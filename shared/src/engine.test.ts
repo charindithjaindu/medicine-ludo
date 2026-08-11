@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   boardConfig,
   cellFor,
+  homeColumnCells,
   isSafeSquare,
   ringCells,
   ringIndexOf,
   startIndex,
+  yardRect,
 } from './board.js'
 import {
   applyRoll,
@@ -61,46 +63,74 @@ function answer(s: GameState, chosen: AnswerLetter | null, correctLetter: Answer
 }
 
 describe('board geometry', () => {
-  it('derives a square ring whose perimeter matches the side length', () => {
-    const quick = boardConfig('quick')
-    expect(quick.side).toBe(5)
-    expect(quick.ring).toBe(16)
-    expect(quick.homeColumn).toBe(1)
-    expect(quick.goal).toBe(17)
-    expect(ringCells(quick)).toHaveLength(16)
-
+  it('builds a cross whose arms follow the classic up-tip-down pattern', () => {
     const std = boardConfig('standard')
-    expect(std.side).toBe(7)
-    expect(std.ring).toBe(24)
+    expect(std.armLength).toBe(3)
+    expect(std.side).toBe(9)
+    expect(std.ring).toBe(4 * (2 * 3 + 1)) // 28
     expect(std.homeColumn).toBe(2)
-    expect(std.goal).toBe(26)
-    expect(ringCells(std)).toHaveLength(24)
+    expect(std.goal).toBe(30)
+    expect(ringCells(std)).toHaveLength(28)
+
+    const quick = boardConfig('quick')
+    expect(quick.side).toBe(7)
+    expect(quick.ring).toBe(20)
+    expect(quick.homeColumn).toBe(1)
+    expect(quick.goal).toBe(21)
+    expect(ringCells(quick)).toHaveLength(20)
   })
 
-  it('spaces the four start squares evenly at the middle of each side', () => {
+  it('never visits the same track cell twice', () => {
+    for (const preset of ['quick', 'standard'] as const) {
+      const b = boardConfig(preset)
+      const seen = new Set(ringCells(b).map((c) => `${c.row},${c.col}`))
+      expect(seen.size).toBe(b.ring)
+    }
+  })
+
+  it('walks between touching cells the whole way round', () => {
+    for (const preset of ['quick', 'standard'] as const) {
+      const b = boardConfig(preset)
+      const cells = ringCells(b)
+      for (let i = 0; i < cells.length; i++) {
+        const a = cells[i]
+        const z = cells[(i + 1) % cells.length]
+        // 1 for a step along an arm, 2 for the diagonal turn between arms.
+        const gap = Math.abs(a.row - z.row) + Math.abs(a.col - z.col)
+        expect(gap).toBeGreaterThanOrEqual(1)
+        expect(gap).toBeLessThanOrEqual(2)
+      }
+    }
+  })
+
+  it('spaces the four start squares one arm apart', () => {
     const b = boardConfig('standard')
-    expect([0, 1, 2, 3].map((s) => startIndex(s, b))).toEqual([3, 9, 15, 21])
-    const cells = ringCells(b)
-    expect(cells[3]).toEqual({ row: 0, col: 3 })
-    expect(cells[9]).toEqual({ row: 3, col: 6 })
-    expect(cells[15]).toEqual({ row: 6, col: 3 })
-    expect(cells[21]).toEqual({ row: 3, col: 0 })
+    expect([0, 1, 2, 3].map((s) => startIndex(s, b))).toEqual([4, 11, 18, 25])
   })
 
   it('marks exactly the four start squares as safe', () => {
     const b = boardConfig('standard')
     const safe = Array.from({ length: b.ring }, (_, i) => i).filter((i) => isSafeSquare(i, b))
-    expect(safe).toEqual([3, 9, 15, 21])
+    expect(safe).toEqual([4, 11, 18, 25])
   })
 
-  it('walks a piece all the way round before turning into its home column', () => {
+  it('turns inward at its own arm tip after a full lap', () => {
     const b = boardConfig('standard')
-    expect(ringIndexOf(0, 0, b)).toBe(3)
-    expect(ringIndexOf(0, 23, b)).toBe(2) // one square short of its own start
-    expect(ringIndexOf(0, 24, b)).toBeNull() // now in the home column
-    expect(cellFor(0, 24, b)).toEqual({ row: 1, col: 3 })
-    expect(cellFor(0, 25, b)).toEqual({ row: 2, col: 3 })
-    expect(cellFor(0, 26, b)).toEqual({ row: 3, col: 3 }) // centre = home
+    expect(cellFor(0, 0, b)).toEqual({ row: 0, col: 5 }) // start, top arm
+    expect(cellFor(0, b.ring - 1, b)).toEqual({ row: 0, col: 4 }) // its own arm tip
+    expect(ringIndexOf(0, b.ring, b)).toBeNull() // off the track
+    expect(cellFor(0, b.ring, b)).toEqual({ row: 1, col: 4 }) // home column
+    expect(cellFor(0, b.ring + 1, b)).toEqual({ row: 2, col: 4 })
+    expect(cellFor(0, b.goal, b)).toEqual({ row: 4, col: 4 }) // centre
+  })
+
+  it('gives each seat a corner yard and a home column that meet the centre', () => {
+    const b = boardConfig('standard')
+    expect(yardRect(0, b)).toEqual({ row: 0, col: 6, size: 3 })
+    expect(yardRect(2, b)).toEqual({ row: 6, col: 0, size: 3 })
+    for (let seat = 0; seat < 4; seat++) {
+      expect(homeColumnCells(seat, b)).toHaveLength(b.homeColumn)
+    }
   })
 })
 
@@ -142,7 +172,7 @@ describe('answering', () => {
 
   it('moves back half the roll, rounded down, on a wrong answer', () => {
     let s = place(game(), 0, 0, 10)
-    s = place(s, 0, 1, 26) // already home, so only one piece can take the penalty
+    s = place(s, 0, 1, 30) // already home, so only one piece can take the penalty
     s = rolled(s, 0, 5)
     s = answer(s, 'B', 'A')
     expect(s.lastResult!.wasCorrect).toBe(false)
@@ -153,7 +183,7 @@ describe('answering', () => {
 
   it('treats a timeout as a wrong answer', () => {
     let s = place(game(), 0, 0, 10)
-    s = place(s, 0, 1, 26)
+    s = place(s, 0, 1, 30)
     s = rolled(s, 0, 4)
     s = answer(s, null, 'A')
     expect(s.lastResult!.wasCorrect).toBe(false)
@@ -163,7 +193,7 @@ describe('answering', () => {
 
   it('never pushes a piece back past its own start square', () => {
     let s = place(game(), 0, 0, 2)
-    s = place(s, 0, 1, 26)
+    s = place(s, 0, 1, 30)
     s = rolled(s, 0, 6)
     s = answer(s, 'B', 'A') // -3 from progress 2
     expect(playerAt(s, 0)!.pieces[0].progress).toBe(0)
@@ -180,16 +210,16 @@ describe('answering', () => {
   })
 
   it('protects pieces in the home column from the backward penalty', () => {
-    let s = place(game(), 0, 0, 25) // home column
-    s = place(s, 0, 1, 26) // finished
+    let s = place(game(), 0, 0, 29) // home column
+    s = place(s, 0, 1, 30) // finished
     s = rolled(s, 0, 4)
     expect(eligiblePieces(s, 0, -2)).toEqual([])
     s = answer(s, 'B', 'A')
-    expect(playerAt(s, 0)!.pieces[0].progress).toBe(25)
+    expect(playerAt(s, 0)!.pieces[0].progress).toBe(29)
   })
 
   it('moves without asking when only one piece is eligible', () => {
-    let s = place(game(), 0, 1, 26)
+    let s = place(game(), 0, 1, 30)
     s = rolled(s, 0, 2)
     s = answer(s, 'A', 'A')
     expect(s.phase).toBe('revealing')
@@ -210,15 +240,15 @@ describe('answering', () => {
 
 describe('capture', () => {
   it('sends an opponent home when landing on them off a safe square', () => {
-    // Seat 0 at progress 1 rolling 4 lands on absolute square 8.
-    // Seat 1 at progress 23 also sits on absolute square 8.
+    // Seat 0 at progress 1 rolling 4 lands on absolute square 9.
+    // Seat 1 at progress 26 also sits on absolute square 9.
     let s = place(game(), 0, 0, 1)
-    s = place(s, 0, 1, 26)
-    s = place(s, 1, 0, 23)
+    s = place(s, 0, 1, 30)
+    s = place(s, 1, 0, 26)
     const b = boardConfig('standard')
-    expect(ringIndexOf(0, 5, b)).toBe(8)
-    expect(ringIndexOf(1, 23, b)).toBe(8)
-    expect(isSafeSquare(8, b)).toBe(false)
+    expect(ringIndexOf(0, 5, b)).toBe(9)
+    expect(ringIndexOf(1, 26, b)).toBe(9)
+    expect(isSafeSquare(9, b)).toBe(false)
 
     s = rolled(s, 0, 4)
     s = answer(s, 'A', 'A')
@@ -228,12 +258,12 @@ describe('capture', () => {
   })
 
   it('does not capture on a safe square', () => {
-    let s = place(game(), 0, 0, 2)
-    s = place(s, 0, 1, 26)
+    let s = place(game(), 0, 0, 3)
+    s = place(s, 0, 1, 30)
     s = place(s, 1, 0, 0) // sitting on its own start, which is safe
     const b = boardConfig('standard')
-    expect(ringIndexOf(0, 6, b)).toBe(9)
-    expect(isSafeSquare(9, b)).toBe(true)
+    expect(ringIndexOf(0, 7, b)).toBe(11)
+    expect(isSafeSquare(11, b)).toBe(true)
 
     s = rolled(s, 0, 4)
     s = answer(s, 'A', 'A')
@@ -242,44 +272,44 @@ describe('capture', () => {
   })
 
   it('never captures a teammate', () => {
-    // Seat 0 lands on absolute 8; seat 2 sits there too. In teams mode they are partners.
+    // Seat 0 lands on absolute 9; seat 2 sits there too. In teams mode they are partners.
     let s = place(game('teams'), 0, 0, 1)
-    s = place(s, 0, 1, 26)
-    s = place(s, 2, 0, 17) // (15 + 17) % 24 = 8
+    s = place(s, 0, 1, 30)
+    s = place(s, 2, 0, 19) // (18 + 19) % 28 = 9
     const b = boardConfig('standard')
-    expect(ringIndexOf(2, 17, b)).toBe(8)
+    expect(ringIndexOf(2, 19, b)).toBe(9)
 
     s = rolled(s, 0, 4)
     s = answer(s, 'A', 'A')
-    expect(playerAt(s, 2)!.pieces[0].progress).toBe(17)
+    expect(playerAt(s, 2)!.pieces[0].progress).toBe(19)
     expect(s.lastResult!.captured).toEqual([])
   })
 
   it('does not capture when moving backward', () => {
-    // Seat 0 retreats from progress 8 to 5, which is absolute square 8 — exactly
+    // Seat 0 retreats from progress 8 to 5, which is absolute square 9 — exactly
     // where seat 1 is sitting. Retreating must not take the piece.
     let s = place(game(), 0, 0, 8)
-    s = place(s, 0, 1, 26)
-    s = place(s, 1, 0, 23) // also absolute square 8
+    s = place(s, 0, 1, 30)
+    s = place(s, 1, 0, 26) // also absolute square 9
     s = rolled(s, 0, 6) // wrong answer -> -3
     s = answer(s, 'B', 'A')
     expect(playerAt(s, 0)!.pieces[0].progress).toBe(5)
-    expect(playerAt(s, 1)!.pieces[0].progress).toBe(23)
+    expect(playerAt(s, 1)!.pieces[0].progress).toBe(26)
   })
 })
 
 describe('reaching home', () => {
   it('lets a piece overshoot into home rather than stalling on an exact count', () => {
-    let s = place(game(), 0, 0, 25)
-    s = place(s, 0, 1, 26)
+    let s = place(game(), 0, 0, 29)
+    s = place(s, 0, 1, 30)
     s = rolled(s, 0, 6)
     s = answer(s, 'A', 'A')
-    expect(playerAt(s, 0)!.pieces[0].progress).toBe(26)
+    expect(playerAt(s, 0)!.pieces[0].progress).toBe(30)
     expect(s.lastResult!.reachedHome).toBe(true)
   })
 
   it('awards the home bonus once', () => {
-    let s = place(game(), 0, 0, 24)
+    let s = place(game(), 0, 0, 28)
     s = place(s, 0, 1, 0)
     s = rolled(s, 0, 2)
     s = answer(s, 'A', 'A')
@@ -311,7 +341,7 @@ describe('turn order', () => {
 
   it('does not grant an extra turn for a wrong answer on a 6', () => {
     let s = place(game(), 0, 0, 5)
-    s = place(s, 0, 1, 26)
+    s = place(s, 0, 1, 30)
     s = rolled(s, 0, 6)
     s = answer(s, 'B', 'A')
     expect(s.lastResult!.extraTurn).toBe(false)
@@ -334,8 +364,8 @@ describe('turn order', () => {
 
 describe('winning', () => {
   it('ends the game in FFA when one player gets both pieces home', () => {
-    let s = place(game(), 0, 0, 26)
-    s = place(s, 0, 1, 25)
+    let s = place(game(), 0, 0, 30)
+    s = place(s, 0, 1, 29)
     s = rolled(s, 0, 1)
     s = answer(s, 'A', 'A')
     expect(s.winner).toEqual({ type: 'player', seat: 0 })
@@ -345,31 +375,31 @@ describe('winning', () => {
 
   it('lets a team win on two pieces home between the partners', () => {
     let s = game('teams')
-    s = place(s, 0, 0, 26)
+    s = place(s, 0, 0, 30)
     expect(detectWinner(s)).toBeNull() // one piece is not enough
 
-    s = place(s, 2, 0, 26) // partner brings the second one home
+    s = place(s, 2, 0, 30) // partner brings the second one home
     expect(detectWinner(s)).toEqual({ type: 'team', team: 0 })
   })
 
   it('lets one partner carry the team alone', () => {
     let s = game('teams')
-    s = place(s, 0, 0, 26)
-    s = place(s, 0, 1, 26)
+    s = place(s, 0, 0, 30)
+    s = place(s, 0, 1, 30)
     expect(detectWinner(s)).toEqual({ type: 'team', team: 0 })
   })
 
   it('counts only pieces belonging to the same team', () => {
     let s = game('teams')
-    s = place(s, 0, 0, 26) // team 0
-    s = place(s, 1, 0, 26) // team 1
+    s = place(s, 0, 0, 30) // team 0
+    s = place(s, 1, 0, 30) // team 1
     expect(detectWinner(s)).toBeNull()
   })
 
   it('gives the win bonus to both partners', () => {
     let s = game('teams')
-    s = place(s, 0, 0, 26)
-    s = place(s, 2, 0, 25)
+    s = place(s, 0, 0, 30)
+    s = place(s, 2, 0, 29)
     s = rolled(s, 2, 1)
     s = answer(s, 'A', 'A')
     s = choosePiece(s, 2, '2-0') // both of seat 2's pieces can move, so it picks
@@ -381,8 +411,8 @@ describe('winning', () => {
   })
 
   it('summarises the table with the winners flagged', () => {
-    let s = place(game(), 0, 0, 26)
-    s = place(s, 0, 1, 25)
+    let s = place(game(), 0, 0, 30)
+    s = place(s, 0, 1, 29)
     s = rolled(s, 0, 1)
     s = answer(s, 'A', 'A')
     const rows = summarise(s)

@@ -155,14 +155,14 @@ export default function Menu({
               onClick={() => setPreset('quick')}
               emoji="⚡"
               title="Quick"
-              detail="Small board · ~20 min"
+              detail="Short arms · ~25 min"
             />
             <Choice
               active={preset === 'standard'}
               onClick={() => setPreset('standard')}
               emoji="🎯"
               title="Standard"
-              detail="Full board · ~35 min"
+              detail="Long arms · ~30 min"
             />
           </div>
 

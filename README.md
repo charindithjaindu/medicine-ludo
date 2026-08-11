@@ -80,13 +80,23 @@ unique key and the only credential — it exists so a returning player keeps the
 score on the global leaderboard. There are no passwords; nothing sensitive sits
 behind a player ID.
 
-**Board.** A square ring with a home column running inward from the middle of each
-side, and a shared home in the centre.
+**Board.** A cross, like a real Ludo board: four corner yards, a track running
+around the arms, each player's colour up the middle of their own arm, and four home
+triangles meeting in the centre.
 
-| Preset | Ring | Home column | Steps per piece | Measured length |
-|---|---|---|---|---|
-| Quick | 16 (5×5) | 1 | 17 | ~40–56 turns |
-| Standard | 24 (7×7) | 2 | 26 | ~75 turns |
+The classic board's arms are 6 + 1 + 6 = 13 squares, 52 in total. That generalises
+— for an arm of length L the track is `4 × (2L + 1)` and the home column is `L - 1`.
+L = 6 is the real board and would take hours with two pieces each, so the presets
+keep the exact shape and shorten the arms.
+
+| Preset | Grid | Arm | Track | Home column | Steps per piece | Measured |
+|---|---|---|---|---|---|---|
+| Quick | 7×7 | 2 | 20 | 1 | 21 | ~62 turns |
+| Standard | 9×9 | 3 | 28 | 2 | 30 | ~73 turns |
+
+Quick is only modestly shorter: a 20-square track with eight pieces on it is
+crowded, so captures drag it back out. `ARM_LENGTHS` in `shared/src/board.ts` is
+the single knob if you want to retune.
 
 Both pieces start **on the board**, on your start square. Waiting to roll a 6 just
 to enter play is the least fun part of Ludo and adds nothing to a question game.
