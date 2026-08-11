@@ -19,6 +19,15 @@ import {
   tierForRoll,
 } from '@shared/engine.js'
 import {
+  AI_NAMES,
+  AI_ID_PREFIX,
+  chooseAnswer,
+  choosePiece as aiChoosePiece,
+  isAiId,
+  thinkTimeMs,
+  type AiSkill,
+} from '@shared/ai.js'
+import {
   TIER_TIME_LIMITS,
   type Ack,
   type AnswerLetter,
@@ -49,6 +58,11 @@ const CHOICE_TIMEOUT_MS = envMs('CHOICE_TIMEOUT_MS', 20000)
 const DISCONNECTED_TIMEOUT_MS = 3000
 /** A room with nobody connected is dropped after this. */
 const EMPTY_ROOM_MS = 120000
+/**
+ * Multiplier on the AI's deliberate pauses. 1 is the human-watchable pace; test
+ * harnesses turn it right down to play a whole game in seconds.
+ */
+const AI_DELAY_SCALE = Number(process.env.AI_DELAY_SCALE ?? 1)
 
 interface SeatEntry {
   playerId: string
@@ -56,6 +70,8 @@ interface SeatEntry {
   ready: boolean
   connected: boolean
   socketId: string | null
+  /** null for a human. AI seats have no socket and always count as ready. */
+  ai: AiSkill | null
 }
 
 interface Room {
@@ -69,6 +85,10 @@ interface Room {
   /** Server-only: holds the correct answer for the question currently in play. */
   pendingQuestion: Question | null
   timer: NodeJS.Timeout | null
+  /** Separate from `timer` so an AI's move never cancels a real deadline. */
+  aiTimer: NodeJS.Timeout | null
+  /** What the pending AI action was scheduled for, to avoid re-arming on every emit. */
+  aiKey: string
   emptySince: NodeJS.Timeout | null
 }
 
@@ -93,11 +113,22 @@ export class RoomManager {
       hostPlayerId: playerId,
       mode,
       preset,
-      seats: [{ playerId, name: profile.name || 'Player', ready: false, connected: true, socketId: socket.id }],
+      seats: [
+        {
+          playerId,
+          name: profile.name || 'Player',
+          ready: false,
+          connected: true,
+          socketId: socket.id,
+          ai: null,
+        },
+      ],
       game: null,
       deck: null,
       pendingQuestion: null,
       timer: null,
+      aiTimer: null,
+      aiKey: '',
       emptySince: null,
     }
     this.rooms.set(code, room)
@@ -134,6 +165,7 @@ export class RoomManager {
         ready: false,
         connected: true,
         socketId: socket.id,
+        ai: null,
       })
     }
 
@@ -175,6 +207,42 @@ export class RoomManager {
     return { ok: true }
   }
 
+  /** Host fills an empty seat with a computer player. */
+  addAi(socket: Sock, skill: AiSkill): Ack {
+    const { room, playerId } = this.locate(socket)
+    if (!room) return { ok: false, error: 'You are not in a room' }
+    if (room.game) return { ok: false, error: 'The game has already started' }
+    if (playerId !== room.hostPlayerId) return { ok: false, error: 'Only the host can add players' }
+    if (room.seats.length >= 4) return { ok: false, error: 'That room is full' }
+
+    const taken = new Set(room.seats.map((s) => s.name))
+    const name = AI_NAMES.find((n) => !taken.has(n)) ?? `Dr. ${room.seats.length + 1}`
+    room.seats.push({
+      playerId: `${AI_ID_PREFIX}${room.code}-${room.seats.length}`,
+      name,
+      ready: true,
+      connected: true,
+      socketId: null,
+      ai: skill,
+    })
+    this.emitRoom(room)
+    return { ok: true }
+  }
+
+  /** Host removes a seat. Only AI seats can be removed this way. */
+  removeSeat(socket: Sock, seat: number): Ack {
+    const { room, playerId } = this.locate(socket)
+    if (!room) return { ok: false, error: 'You are not in a room' }
+    if (room.game) return { ok: false, error: 'The game has already started' }
+    if (playerId !== room.hostPlayerId) return { ok: false, error: 'Only the host can do that' }
+    const entry = room.seats[seat]
+    if (!entry) return { ok: false, error: 'No such seat' }
+    if (!entry.ai) return { ok: false, error: 'That seat belongs to a player' }
+    room.seats.splice(seat, 1)
+    this.emitRoom(room)
+    return { ok: true }
+  }
+
   startGame(socket: Sock): Ack {
     const { room, playerId } = this.locate(socket)
     if (!room) return { ok: false, error: 'You are not in a room' }
@@ -185,7 +253,7 @@ export class RoomManager {
       return { ok: false, error: '2v2 needs exactly 4 players' }
     }
     if (room.seats.length < 2) return { ok: false, error: 'Need at least 2 players' }
-    if (!room.seats.every((s) => s.ready || s.playerId === room.hostPlayerId)) {
+    if (!room.seats.every((s) => s.ai || s.ready || s.playerId === room.hostPlayerId)) {
       return { ok: false, error: 'Everyone needs to be ready' }
     }
 
@@ -224,11 +292,13 @@ export class RoomManager {
       this.syncConnectionFlags(room)
     } else {
       room.seats = room.seats.filter((s) => s.playerId !== playerId)
-      if (room.seats.length === 0) {
+      // A lobby of nothing but computer players is over.
+      const humans = room.seats.filter((s) => !s.ai)
+      if (humans.length === 0) {
         this.destroy(room)
         return { ok: true }
       }
-      if (room.hostPlayerId === playerId) room.hostPlayerId = room.seats[0].playerId
+      if (room.hostPlayerId === playerId) room.hostPlayerId = humans[0].playerId
     }
 
     this.emitRoom(room)
@@ -252,11 +322,12 @@ export class RoomManager {
 
     if (!room.game) {
       room.seats = room.seats.filter((s) => s.playerId !== seat.playerId)
-      if (room.seats.length === 0) {
+      const humans = room.seats.filter((s) => !s.ai)
+      if (humans.length === 0) {
         this.destroy(room)
         return
       }
-      if (room.hostPlayerId === seat.playerId) room.hostPlayerId = room.seats[0].playerId
+      if (room.hostPlayerId === seat.playerId) room.hostPlayerId = humans[0].playerId
     } else {
       this.syncConnectionFlags(room)
       this.emitGame(room)
@@ -331,10 +402,14 @@ export class RoomManager {
     })
     this.emitGame(room)
 
-    room.timer = setTimeout(
-      () => this.performAnswer(room, null),
-      deadline - Date.now() + ANSWER_GRACE_MS,
-    )
+    // Everyone sees the real deadline, but a player who has dropped is not going to
+    // answer — don't make the rest of the table sit through 45 seconds of nothing.
+    const seat = room.seats[game.turnSeat]
+    const waitMs =
+      seat && !seat.ai && !seat.connected
+        ? DISCONNECTED_TIMEOUT_MS
+        : deadline - Date.now() + ANSWER_GRACE_MS
+    room.timer = setTimeout(() => this.performAnswer(room, null), waitMs)
   }
 
   private performAnswer(room: Room, letter: AnswerLetter | null) {
@@ -402,7 +477,8 @@ export class RoomManager {
   private finishGame(room: Room) {
     const game = room.game!
     const summary = summarise(game)
-    recordGameResults(summary)
+    // Computer players appear in the end-of-game table but never on the leaderboard.
+    recordGameResults(summary.filter((row) => !isAiId(row.playerId)))
     this.io.to(room.code).emit('gameOver', { winner: game.winner!, summary })
     // The room stays alive so everyone can read the summary; it is dropped once empty.
   }
@@ -459,7 +535,8 @@ export class RoomManager {
   }
 
   private checkEmpty(room: Room) {
-    if (room.seats.some((s) => s.connected)) {
+    // AI seats are always "connected", so only humans keep a room alive.
+    if (room.seats.some((s) => !s.ai && s.connected)) {
       this.cancelEmptyTimer(room)
       return
     }
@@ -474,6 +551,7 @@ export class RoomManager {
 
   private destroy(room: Room) {
     this.clearTimer(room)
+    this.clearAiTimer(room)
     this.cancelEmptyTimer(room)
     this.rooms.delete(room.code)
   }
@@ -500,6 +578,7 @@ export class RoomManager {
         team: room.mode === 'teams' ? seat % 2 : seat,
         ready: s.ready,
         connected: s.connected,
+        ai: s.ai,
       })),
     }
   }
@@ -510,5 +589,65 @@ export class RoomManager {
 
   private emitGame(room: Room) {
     if (room.game) this.io.to(room.code).emit('game', room.game)
+    this.maybeScheduleAi(room)
+  }
+
+  /**
+   * If the seat on turn is a computer player, queue its move.
+   *
+   * Keyed on (seat, phase, question) so repeated state broadcasts don't keep
+   * pushing the timer back — otherwise an AI could be perpetually "about to
+   * answer" while other events churn the state.
+   */
+  private maybeScheduleAi(room: Room) {
+    const game = room.game
+    if (!game || game.winner || game.phase === 'game-over') return
+
+    const seat = room.seats[game.turnSeat]
+    if (!seat?.ai) {
+      this.clearAiTimer(room)
+      return
+    }
+
+    const key = `${game.turnSeat}:${game.phase}:${game.question?.id ?? '-'}`
+    if (key === room.aiKey && room.aiTimer) return
+    this.clearAiTimer(room)
+    room.aiKey = key
+
+    const run = (fn: () => void, baseDelay: number) => {
+      const delay = Math.max(10, baseDelay * AI_DELAY_SCALE)
+      room.aiTimer = setTimeout(() => {
+        room.aiTimer = null
+        room.aiKey = ''
+        try {
+          fn()
+        } catch {
+          /* the game moved on without us */
+        }
+      }, delay)
+    }
+
+    if (game.phase === 'awaiting-roll') {
+      run(() => this.performRoll(room), 1100)
+      return
+    }
+
+    if (game.phase === 'answering' && room.pendingQuestion) {
+      const question = room.pendingQuestion
+      const letter = chooseAnswer(seat.ai, question.tier, question.answer)
+      run(() => this.performAnswer(room, letter), thinkTimeMs(question.tier))
+      return
+    }
+
+    if (game.phase === 'choosing-piece' && game.choices.length > 0) {
+      const pick = aiChoosePiece(game, game.turnSeat, game.pendingDistance, game.choices)
+      run(() => this.performChoice(room, pick), 850)
+    }
+  }
+
+  private clearAiTimer(room: Room) {
+    if (room.aiTimer) clearTimeout(room.aiTimer)
+    room.aiTimer = null
+    room.aiKey = ''
   }
 }

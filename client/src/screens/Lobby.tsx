@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PlayerProfile, RoomView } from '@shared/types.js'
 import { SEAT_COLORS, TEAM_NAMES } from '@shared/board.js'
+import { AI_SKILLS, AI_SKILL_BLURBS, AI_SKILL_LABELS, type AiSkill } from '@shared/ai.js'
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
 import { Button, Loader, Panel, Screen, SoundToggle } from '../components/ui.tsx'
@@ -16,6 +17,7 @@ export default function Lobby({
 }) {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [aiSkill, setAiSkill] = useState<AiSkill>('resident')
   const isHost = room.hostPlayerId === player.id
   const me = room.seats.find((s) => s.playerId === player.id)
   const canStart = room.mode === 'teams' ? room.seats.length === 4 : room.seats.length >= 2
@@ -74,6 +76,31 @@ export default function Lobby({
         </div>
       </Panel>
 
+      {isHost && room.seats.length < 4 && (
+        <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-white/50">
+            Computer skill
+          </span>
+          {AI_SKILLS.map((skill) => (
+            <button
+              key={skill}
+              onClick={() => {
+                audio.play('click')
+                setAiSkill(skill)
+              }}
+              title={AI_SKILL_BLURBS[skill]}
+              className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
+                aiSkill === skill
+                  ? 'border-ink bg-violet-300 text-ink'
+                  : 'border-white/25 bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              {AI_SKILL_LABELS[skill]}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mb-5 grid gap-3 sm:grid-cols-2">
         {Array.from({ length: 4 }, (_, seat) => {
           const s = room.seats[seat]
@@ -97,6 +124,7 @@ export default function Lobby({
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold leading-tight">
+                      {s.ai && '🤖 '}
                       {s.name || 'Player'}
                       {s.playerId === player.id && (
                         <span className="ml-1 text-xs text-ink/50">(you)</span>
@@ -105,18 +133,36 @@ export default function Lobby({
                     <p className="text-xs text-ink/60">
                       {s.playerId === room.hostPlayerId && '👑 host · '}
                       {room.mode === 'teams' && `${TEAM_NAMES[seat % 2]} · `}
-                      <span
-                        className={
-                          s.ready || s.playerId === room.hostPlayerId
-                            ? 'font-semibold text-emerald-600'
-                            : 'text-ink/50'
-                        }
-                      >
-                        {s.ready || s.playerId === room.hostPlayerId ? 'ready' : 'waiting…'}
-                      </span>
+                      {s.ai ? (
+                        <span className="font-semibold text-violet-600">
+                          {AI_SKILL_LABELS[s.ai]}
+                        </span>
+                      ) : (
+                        <span
+                          className={
+                            s.ready || s.playerId === room.hostPlayerId
+                              ? 'font-semibold text-emerald-600'
+                              : 'text-ink/50'
+                          }
+                        >
+                          {s.ready || s.playerId === room.hostPlayerId ? 'ready' : 'waiting…'}
+                        </span>
+                      )}
                     </p>
                   </div>
-                  {isHost && seat > 0 && (
+                  {isHost && s.ai && (
+                    <button
+                      title="Remove this computer player"
+                      onClick={() => {
+                        audio.play('click')
+                        act(() => emit('removeSeat', { seat }))
+                      }}
+                      className="rounded-lg border-2 border-ink bg-white px-2 py-0.5 text-sm hover:bg-rose-100"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {isHost && !s.ai && seat > 0 && (
                     <button
                       title="Swap with the seat above"
                       onClick={() => {
@@ -129,6 +175,16 @@ export default function Lobby({
                     </button>
                   )}
                 </div>
+              ) : isHost ? (
+                <button
+                  onClick={() => {
+                    audio.play('join')
+                    act(() => emit('addAi', { skill: aiSkill }))
+                  }}
+                  className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  🤖 Add {AI_SKILL_LABELS[aiSkill]}
+                </button>
               ) : (
                 <div className="flex h-[52px] items-center justify-center gap-3">
                   <Loader />

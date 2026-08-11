@@ -85,7 +85,7 @@ export default function Game({
           </div>
         </header>
 
-        <PlayerStrip game={game} mySeat={mySeat} />
+        <PlayerStrip game={game} mySeat={mySeat} room={room} />
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
           {/* The board is square, so cap it by viewport height — otherwise it pushes
@@ -181,7 +181,15 @@ function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
 
 // ---------------------------------------------------------------------------
 
-function PlayerStrip({ game, mySeat }: { game: GameState; mySeat: number }) {
+function PlayerStrip({
+  game,
+  mySeat,
+  room,
+}: {
+  game: GameState
+  mySeat: number
+  room: RoomView
+}) {
   const b = boardConfig(game.preset)
   const teamHome = (team: number) =>
     game.players
@@ -213,6 +221,7 @@ function PlayerStrip({ game, mySeat }: { game: GameState; mySeat: number }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold leading-tight">
+                  {room.seats.find((s) => s.playerId === p.playerId)?.ai && '🤖 '}
                   {p.name || 'Player'}
                   {p.seat === mySeat && <span className="ml-1 text-xs text-ink/45">(you)</span>}
                 </p>

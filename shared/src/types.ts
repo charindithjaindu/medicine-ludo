@@ -213,6 +213,8 @@ export interface Seat {
   team: number
   ready: boolean
   connected: boolean
+  /** null for a human; the skill level for a computer player. */
+  ai: import('./ai.js').AiSkill | null
 }
 
 export interface RoomView {
@@ -244,6 +246,8 @@ export interface ClientToServerEvents {
   setReady: (p: { ready: boolean }, ack: (r: Ack) => void) => void
   setMode: (p: { mode: GameMode; preset: BoardPreset }, ack: (r: Ack) => void) => void
   swapSeats: (p: { a: number; b: number }, ack: (r: Ack) => void) => void
+  addAi: (p: { skill: import('./ai.js').AiSkill }, ack: (r: Ack) => void) => void
+  removeSeat: (p: { seat: number }, ack: (r: Ack) => void) => void
   startGame: (ack: (r: Ack) => void) => void
   roll: (ack: (r: Ack) => void) => void
   answer: (p: { letter: AnswerLetter }, ack: (r: Ack) => void) => void

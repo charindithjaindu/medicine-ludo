@@ -26,12 +26,24 @@ re-running it corrects the seeded cards rather than duplicating them.
 
 ### Playing without four humans
 
-```bash
-npm run bots -- <room-code>     # fills the room with 3 bots that play their own turns
-```
+In the lobby, the host can drop a computer player into any empty seat — pick
+**Intern**, **Resident** or **Consultant**, then tap the empty seat. Start with one
+human and three AI if you like.
 
-Create a room in the browser, pass the code to that command, then press Start. Bots
-look answers up in the database, so this is a dev tool, not a feature.
+They're deliberately simple; this is a multiplayer game first. Answering is a
+difficulty dial (a per-tier chance of being right, declining as cards get harder,
+so a Consultant rarely misses an easy one and still fumbles the hardest). Piece
+choice is a short priority list: reach home > capture > home column > safe square,
+ties to the piece furthest along; going backward it retreats whichever piece can
+most afford it. That lives in `shared/src/ai.ts` as pure functions with tests.
+
+**Computer players never reach the leaderboard.** Their IDs are prefixed `ai-`, so
+they create no player rows and are filtered out before results are recorded. They
+still appear in the end-of-game table.
+
+There is also `npm run playtest -- ffa quick` — four scripted clients that play a
+full game over real sockets as *real* players, which is how the leaderboard write
+path gets tested. That one is a test harness, not a way to play.
 
 ---
 
@@ -156,8 +168,9 @@ npm run playtest -- ffa quick 0.75    # 4 bots play a real game over sockets,
 npm run playtest -- teams standard    # then the leaderboard is checked against the result
 ```
 
-`REVEAL_MS`, `ROLL_TIMEOUT_MS` and `CHOICE_TIMEOUT_MS` are env-overridable, which is
-how the playtest runs a full game in seconds.
+`REVEAL_MS`, `ROLL_TIMEOUT_MS`, `CHOICE_TIMEOUT_MS` and `AI_DELAY_SCALE` are
+env-overridable, which is how a full game runs in seconds under test.
+`AI_DELAY_SCALE=0.02` collapses the computer players' deliberate thinking pauses.
 
 ## Tuning
 
