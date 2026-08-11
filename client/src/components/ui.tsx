@@ -35,14 +35,50 @@ export function Backdrop() {
   )
 }
 
-export function Screen({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+export function Screen({
+  children,
+  wide = false,
+  center = false,
+}: {
+  children: React.ReactNode
+  wide?: boolean
+  /** Vertically centre the content — right for short screens like the menu. */
+  center?: boolean
+}) {
   return (
     <>
       <Backdrop />
-      <div className="relative flex min-h-full flex-col items-center px-4 py-6">
+      <div
+        className={`relative flex min-h-full flex-col items-center px-4 py-6 ${
+          center ? 'justify-center' : ''
+        }`}
+      >
         <div className={`w-full ${wide ? 'max-w-6xl' : 'max-w-lg'}`}>{children}</div>
       </div>
     </>
+  )
+}
+
+/**
+ * A dialog that is a bottom sheet on a phone and a centred card on a desktop —
+ * where a thumb can reach it on one, and where the eye already is on the other.
+ */
+export function Sheet({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/70 sm:items-center sm:p-4">
+      <div
+        className={`animate-rise-in max-h-[92vh] w-full overflow-y-auto border-[3px] border-ink bg-cream
+          rounded-t-3xl sm:max-w-lg sm:rounded-3xl sm:shadow-[6px_6px_0_0_var(--color-ink)] ${className}`}
+      >
+        {children}
+      </div>
+    </div>
   )
 }
 

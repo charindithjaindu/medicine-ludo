@@ -33,7 +33,7 @@ export default function Identity({ onReady }: { onReady: (p: PlayerProfile) => v
   }
 
   return (
-    <Screen>
+    <Screen center>
       <div className="absolute right-4 top-6">
         <SoundToggle />
       </div>

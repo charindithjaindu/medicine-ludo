@@ -15,7 +15,7 @@ import { boardConfig, SEAT_COLORS, TEAM_NAMES } from '@shared/board.js'
 import Board from '../components/Board.tsx'
 import Dice from '../components/Dice.tsx'
 import Confetti from '../components/Confetti.tsx'
-import { Backdrop, Button, Loader, Panel, SoundToggle } from '../components/ui.tsx'
+import { Backdrop, Button, Loader, Panel, Sheet, SoundToggle } from '../components/ui.tsx'
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
 
@@ -64,7 +64,7 @@ export default function Game({
       )}
 
       <div
-        className={`relative mx-auto w-full max-w-6xl px-4 py-4 ${
+        className={`relative mx-auto w-full max-w-6xl px-4 py-4 pb-28 lg:pb-4 ${
           flash === 'bad' ? 'animate-shake' : ''
         }`}
       >
@@ -107,12 +107,30 @@ export default function Game({
             </p>
           </div>
 
-          <div className="space-y-3">
+          {/* On a phone the turn controls move to a fixed bar at the bottom, where a
+              thumb can reach them and where they cost no vertical space. */}
+          <div className="hidden space-y-3 lg:block">
             <TurnPanel game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
             <LogPanel game={game} />
           </div>
         </div>
       </div>
+
+      <MobileTurnBar game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+
+      {/* The question pops up over everything: on a phone the board would otherwise
+          push it below the fold, and the clock is running. */}
+      {game.phase === 'answering' && game.question && (
+        <Sheet>
+          <QuestionPanel game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+        </Sheet>
+      )}
+
+      {game.phase === 'revealing' && game.lastResult && !over && (
+        <Sheet>
+          <RevealPanel game={game} />
+        </Sheet>
+      )}
 
       {over && <GameOverOverlay over={over} game={game} player={player} onLeave={onLeave} />}
     </div>
@@ -197,7 +215,7 @@ function PlayerStrip({
       .reduce((n, p) => n + p.pieces.filter((pc) => pc.progress >= b.goal).length, 0)
 
   return (
-    <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
       {game.players.map((p) => {
         const home = p.pieces.filter((pc) => pc.progress >= b.goal).length
         const isTurn = p.seat === game.turnSeat
@@ -321,8 +339,16 @@ function TurnPanel({
     )
   }
 
+  // The question itself is a sheet over the board; this is just the status behind it.
   if (game.phase === 'answering' && game.question) {
-    return <QuestionPanel game={game} myTurn={myTurn} activeName={activeName} rolling={rolling} />
+    return (
+      <Panel className="p-5 text-center">
+        <Dice value={game.roll} rolling={rolling} size={72} />
+        <p className="mt-3 font-semibold">
+          {myTurn ? 'Answer the question…' : `${activeName} is answering…`}
+        </p>
+      </Panel>
+    )
   }
 
   if (game.phase === 'choosing-piece') {
@@ -357,7 +383,20 @@ function TurnPanel({
     )
   }
 
-  if (game.lastResult) return <RevealPanel game={game} />
+  if (game.lastResult) {
+    return (
+      <Panel className="p-5 text-center">
+        <Dice value={game.roll} size={72} />
+        <p
+          className={`mt-3 text-xl font-bold ${
+            game.lastResult.wasCorrect ? 'text-emerald-600' : 'text-rose-600'
+          }`}
+        >
+          {game.lastResult.wasCorrect ? 'Correct!' : 'Wrong'}
+        </p>
+      </Panel>
+    )
+  }
 
   return (
     <Panel className="p-6">
@@ -366,16 +405,72 @@ function TurnPanel({
   )
 }
 
-function QuestionPanel({
+/**
+ * The phone's turn controls: pinned to the bottom, always within thumb reach, and
+ * costing the board no vertical space.
+ */
+function MobileTurnBar({
   game,
   myTurn,
   activeName,
-  rolling,
 }: {
   game: GameState
   myTurn: boolean
   activeName: string
-  rolling: boolean
+}) {
+  const [rolling, setRolling] = useState(false)
+
+  async function roll() {
+    setRolling(true)
+    await emit('roll')
+    setTimeout(() => setRolling(false), 700)
+  }
+
+  let content: React.ReactNode
+  if (game.phase === 'awaiting-roll' && myTurn) {
+    content = (
+      <Button variant="primary" size="lg" className="w-full" onClick={roll} sound={null}>
+        🎲 Roll the die
+      </Button>
+    )
+  } else if (game.phase === 'choosing-piece' && myTurn) {
+    content = (
+      <p className="py-1 text-center font-semibold">
+        Tap a glowing piece to move{' '}
+        {game.pendingDistance > 0 ? `forward ${game.pendingDistance}` : `back ${-game.pendingDistance}`}
+      </p>
+    )
+  } else {
+    content = (
+      <p className="py-1 text-center text-sm font-medium text-ink/70">
+        {game.phase === 'awaiting-roll'
+          ? `Waiting for ${activeName} to roll…`
+          : `${activeName}'s turn`}
+      </p>
+    )
+  }
+
+  return (
+    <div
+      className="fixed inset-x-0 bottom-0 z-30 border-t-[3px] border-ink bg-cream px-3 pt-2.5 lg:hidden"
+      style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}
+    >
+      <div className="mx-auto flex max-w-lg items-center gap-3">
+        <Dice value={game.roll} rolling={rolling} size={48} />
+        <div className="min-w-0 flex-1">{content}</div>
+      </div>
+    </div>
+  )
+}
+
+function QuestionPanel({
+  game,
+  myTurn,
+  activeName,
+}: {
+  game: GameState
+  myTurn: boolean
+  activeName: string
 }) {
   const q = game.question!
   const left = useCountdown(q.deadline)
@@ -396,9 +491,9 @@ function QuestionPanel({
   }, [seconds, urgent, myTurn, sent])
 
   return (
-    <Panel className={`p-4 ${urgent && myTurn && !sent ? 'animate-throb' : ''}`}>
+    <div className={`p-4 ${urgent && myTurn && !sent ? 'animate-throb' : ''}`}>
       <div className="flex items-center gap-3">
-        <Dice value={game.roll} rolling={rolling} size={56} />
+        <Dice value={game.roll} size={56} />
         <div className="min-w-0 flex-1">
           <span
             className={`inline-block rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-bold ${
@@ -467,7 +562,7 @@ function QuestionPanel({
       {myTurn && sent && (
         <p className="mt-3 text-center text-sm font-medium text-ink/60">Locked in 🔒</p>
       )}
-    </Panel>
+    </div>
   )
 }
 
@@ -481,9 +576,7 @@ function RevealPanel({ game }: { game: GameState }) {
         : `Moved back ${-r.distance}`
 
   return (
-    <Panel
-      className={`animate-pop-in p-5 ${r.wasCorrect ? 'bg-emerald-50!' : 'bg-rose-50!'}`}
-    >
+    <div className={`p-5 ${r.wasCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
       <div className="flex items-center gap-3">
         <Dice value={r.roll} size={56} />
         <div>
@@ -516,7 +609,7 @@ function RevealPanel({ game }: { game: GameState }) {
         {r.reachedHome && <li className="text-amber-600">★ A piece reached home!</li>}
         {r.extraTurn && <li className="text-emerald-700">🎲 Rolled a 6 — go again!</li>}
       </ul>
-    </Panel>
+    </div>
   )
 }
 

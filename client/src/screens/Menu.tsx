@@ -54,7 +54,7 @@ export default function Menu({
   const accuracy = player.answered > 0 ? Math.round((player.correct / player.answered) * 100) : null
 
   return (
-    <Screen>
+    <Screen center>
       <header className="mb-6 flex items-center justify-between gap-2">
         <Link
           to="/leaderboard"
