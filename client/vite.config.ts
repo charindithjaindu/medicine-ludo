@@ -17,9 +17,11 @@ export default defineConfig({
     port: 5173,
     // Shared game code lives outside the client root, so Vite has to be allowed to serve it.
     fs: { allow: [path.resolve(here, '..')] },
+    // In development the app is served by Vite for HMR, while the API and the
+    // websocket come from `wrangler dev` — the same Worker that runs in production.
     proxy: {
-      '/api': { target: 'http://localhost:3001', changeOrigin: true },
-      '/socket.io': { target: 'http://localhost:3001', ws: true },
+      '/api': { target: 'http://localhost:8787', changeOrigin: true },
+      '/ws': { target: 'ws://localhost:8787', ws: true },
     },
   },
 })

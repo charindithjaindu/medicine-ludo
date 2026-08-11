@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "medicine-ludo",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+
+  // The built client. `not_found_handling` makes /admin and /leaderboard work as
+  // client-side routes instead of 404ing.
+  "assets": {
+    "directory": "../client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // One Durable Object per room code: the single authoritative instance a
+  // turn-based game needs.
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomDurableObject" }]
+  },
+  // SQLite-backed classes are the ones available on the free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "medicine-ludo",
+      // Replaced by `npm run cf:init` with the real id from `wrangler d1 create`.
+      "database_id": "PLACEHOLDER_RUN_CF_INIT"
+    }
+  ],
+
+  "observability": { "enabled": true }
+}

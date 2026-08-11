@@ -7,13 +7,12 @@
  * parser still validates everything it produces and reports problems rather than
  * quietly importing a card whose answer letter disagrees with its answer text.
  *
- * Used both by `npm run import:pdf` and by the admin panel's re-import button.
+ * Used by `npm run import:pdf`, which turns the result into SQL for D1.
  */
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import type { AnswerLetter, QuestionDraft, Tier } from '@shared/types.js'
-import { upsertBySourceCard } from './db.js'
 
 const TIER_BY_NAME: Record<string, Tier> = {
   EASY: 1,
@@ -197,23 +196,4 @@ export function parsePdf(pdfPath: string): ParseReport {
   }
 
   return { cards, problems }
-}
-
-export interface ImportResult {
-  created: number
-  updated: number
-  parsed: number
-  problems: string[]
-}
-
-export function importPdf(pdfPath: string): ImportResult {
-  const { cards, problems } = parsePdf(pdfPath)
-  let created = 0
-  let updated = 0
-  for (const card of cards) {
-    const r = upsertBySourceCard(card)
-    if (r.created) created++
-    else updated++
-  }
-  return { created, updated, parsed: cards.length, problems }
 }

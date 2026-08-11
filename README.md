@@ -15,14 +15,15 @@ nothing extra to explain.
 
 ```bash
 npm install
-npm run import:pdf     # seeds the 90 questions from "tiered qa cards.pdf"
-npm run dev            # server on :3001, client on :5173
+npm run dev            # Worker on :8787 (wrangler), client on :5173 (vite)
+npm run import:pdf     # seeds the 90 questions into the local D1
 ```
 
-Open http://localhost:5173.
+Open http://localhost:5173. To deploy, see [DEPLOY.md](DEPLOY.md).
 
 `npm run import:pdf` needs `pdftotext` (`brew install poppler`). It is idempotent —
-re-running it corrects the seeded cards rather than duplicating them.
+rows are matched on the PDF card number, so re-running corrects the seeded cards
+and leaves their statistics alone. Add `--remote` to seed the deployed database.
 
 ### Playing without four humans
 
@@ -130,7 +131,8 @@ worth 0 — never negative, so the leaderboard stays encouraging.
 
 ## Admin
 
-At **`/admin`**, behind `ADMIN_PASSWORD` from `.env`. Nothing in the player UI links
+At **`/admin`**, behind `ADMIN_PASSWORD` (a Worker secret in production,
+`worker/.dev.vars` locally). Nothing in the player UI links
 there — players use `/`, admins type `/admin`. An unauthenticated visit shows a bare
 password box, and every `/api/admin/*` route returns 401 without a session.
 
@@ -141,7 +143,9 @@ password box, and every `/api/admin/*` route returns 401 without a session.
   card is probably wrong or ambiguous; a 100% card on a hard tier belongs lower.
 - Bulk CSV/JSON import with a **dry-run preview** before anything is written, plus
   export. An export re-imported updates the same rows, so it doubles as a backup.
-- Re-run the source PDF, matching on card number so stats survive.
+- Re-run the source PDF — locally only. It shells out to `pdftotext`, which Workers
+  cannot run, so the deployed button returns a message pointing at
+  `npm run import:pdf -- --remote`.
 
 **One invariant matters more than the rest: a tier can never reach zero active
 questions.** The die face *is* the tier, so an empty tier would be a roll the game
@@ -155,20 +159,21 @@ disturb a game already in progress.
 ## Layout
 
 ```
-shared/src/      types · board geometry · engine (pure rules) · engine.test.ts
-server/src/      index · rooms (turn loop) · admin · api · db · questions · pdf-import
+shared/src/      types · board geometry · engine (pure rules) · ai · room-engine · protocol
+worker/src/      index (Worker) · room (Durable Object) · db (D1) · admin
 client/src/      screens/ (Play · Identity · Menu · Lobby · Game · Leaderboard · admin/)
-scripts/         import-pdf · playtest · bots
+scripts/         import-pdf · parse-cards · playtest · cf-init
 ```
 
-Every rule lives in `shared/src/engine.ts` as pure `(state, action) => newState`
-functions — no sockets, no clocks, no database. `server/src/rooms.ts` owns all of
-that and is the only place that knows a question's answer before the reveal, which
-is why broadcasting the whole game state to the room is safe.
+Two layers of "no I/O here". `shared/src/engine.ts` holds the rules as pure
+`(state, action) => newState` functions. `shared/src/room-engine.ts` wraps them with
+the lobby and the clocks but still never touches a socket or a database — it
+broadcasts through a callback and is handed anything it needs.
 
-That split is also what keeps a later Cloudflare port cheap: replacing
-`server/src/index.ts` with a Worker + Durable Object and SQLite with D1 leaves the
-engine and the entire client untouched.
+That is what lets one turn loop run behind `wrangler dev` locally and inside a
+Durable Object in production, with no duplicated rules. `room-engine` is also the
+only place that knows a question's answer before the reveal, which is why
+broadcasting the whole game state to the room is safe.
 
 ## Tests
 
@@ -178,9 +183,9 @@ npm run playtest -- ffa quick 0.75    # 4 bots play a real game over sockets,
 npm run playtest -- teams standard    # then the leaderboard is checked against the result
 ```
 
-`REVEAL_MS`, `ROLL_TIMEOUT_MS`, `CHOICE_TIMEOUT_MS` and `AI_DELAY_SCALE` are
-env-overridable, which is how a full game runs in seconds under test.
-`AI_DELAY_SCALE=0.02` collapses the computer players' deliberate thinking pauses.
+`REVEAL_MS` and `AI_DELAY_SCALE` can be set in `worker/.dev.vars` to speed a game
+up while testing; `AI_DELAY_SCALE=0.05` collapses the computer players' deliberate
+thinking pauses.
 
 ## Tuning
 

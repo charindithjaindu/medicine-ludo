@@ -1,9 +1,8 @@
 node_modules/
 dist/
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
 .env
+.wrangler/
 .DS_Store
 *.log
+.dev.vars
+worker/seed-questions.sql

@@ -1,30 +1,58 @@
 /**
- * End-to-end harness: four bots play a real game against the running server over
- * real sockets, and the result is checked against the database.
+ * End-to-end harness: four clients play a real game against a running server over
+ * real websockets, and the result is checked against the database.
  *
- * Bots look the correct answer up locally (they are a test fixture, not a player)
- * and answer correctly with probability ACCURACY, so both the forward and the
- * backward paths get exercised on the way to a genuine win.
+ *   npm run playtest                      # against `npm run dev`
+ *   npm run playtest -- teams standard    # mode and board
+ *   BASE=https://… npm run playtest       # against the deployed Worker
  *
- *   npm run playtest -- [ffa|teams] [quick|standard] [accuracy]
+ * The answer key comes from the admin export, so this exercises the admin API too.
+ * Real players, not the in-game AI — this is what verifies the leaderboard path
+ * that computer players deliberately bypass.
  */
 
-import { io, type Socket } from 'socket.io-client'
-import type {
-  AnswerLetter,
-  BoardPreset,
-  GameMode,
-  GameState,
-  GameSummaryRow,
-  Winner,
-} from '../shared/src/types.js'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { AnswerLetter, BoardPreset, GameMode, GameState, Question } from '../shared/src/types.js'
 import { ANSWER_LETTERS } from '../shared/src/types.js'
-import { getPlayer, getQuestion } from '../server/src/db.js'
 
-const BASE = process.env.BASE ?? 'http://localhost:3001'
+const here = path.dirname(fileURLToPath(import.meta.url))
+const root = path.resolve(here, '..')
+
+const BASE = process.env.BASE ?? 'http://localhost:8787'
 const mode = (process.argv[2] as GameMode) ?? 'ffa'
 const preset = (process.argv[3] as BoardPreset) ?? 'quick'
 const ACCURACY = Number(process.argv[4] ?? 0.75)
+
+function adminPassword(): string {
+  if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD
+  for (const file of ['.env', 'worker/.dev.vars']) {
+    const p = path.join(root, file)
+    if (!fs.existsSync(p)) continue
+    const m = /^ADMIN_PASSWORD=(.*)$/m.exec(fs.readFileSync(p, 'utf8'))
+    if (m) return m[1].trim()
+  }
+  throw new Error('No ADMIN_PASSWORD found in env, .env or worker/.dev.vars')
+}
+
+/** The answer key, so the harness can hit a target accuracy on purpose. */
+async function fetchAnswerKey(): Promise<Map<number, AnswerLetter>> {
+  const login = await fetch(`${BASE}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: adminPassword() }),
+  })
+  if (!login.ok) throw new Error(`Admin login failed: ${login.status}`)
+  const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? ''
+
+  const res = await fetch(`${BASE}/api/admin/questions/export?format=json`, {
+    headers: { cookie },
+  })
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+  const { questions } = (await res.json()) as { questions: Question[] }
+  return new Map(questions.map((q) => [q.id, q.answer]))
+}
 
 async function createPlayer(name: string): Promise<string> {
   const res = await fetch(`${BASE}/api/players`, {
@@ -32,135 +60,151 @@ async function createPlayer(name: string): Promise<string> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
   })
-  const body = await res.json()
-  return body.player.id
+  return (await res.json()).player.id
 }
 
-function connect(): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = io(BASE, { transports: ['websocket'] })
-    socket.on('connect', () => resolve(socket))
-    socket.on('connect_error', reject)
-  })
+async function getPlayer(id: string) {
+  const res = await fetch(`${BASE}/api/players/${id}`)
+  return (await res.json()).player
 }
 
-function ask<T = unknown>(socket: Socket, event: string, payload?: unknown): Promise<T> {
-  return new Promise((resolve) => {
-    if (payload === undefined) socket.emit(event, resolve)
-    else socket.emit(event, payload, resolve)
-  })
+/** A thin client speaking the same envelope the browser uses. */
+class Client {
+  private ws!: WebSocket
+  private nextId = 1
+  private pending = new Map<number, (ack: unknown) => void>()
+  onGame?: (game: GameState) => void
+  onGameOver?: (payload: never) => void
+
+  constructor(
+    readonly name: string,
+    readonly playerId: string,
+  ) {}
+
+  connect(code: string): Promise<void> {
+    const url = `${BASE.replace(/^http/, 'ws')}/ws?code=${code}&playerId=${this.playerId}`
+    this.ws = new WebSocket(url)
+    return new Promise((resolve, reject) => {
+      this.ws.addEventListener('open', () => resolve())
+      this.ws.addEventListener('error', () => reject(new Error(`${this.name} could not connect`)))
+      this.ws.addEventListener('message', (event) => {
+        const msg = JSON.parse(String(event.data))
+        if (msg.t === 'ack') {
+          this.pending.get(msg.id)?.(msg)
+          this.pending.delete(msg.id)
+        } else if (msg.event === 'game') {
+          this.onGame?.(msg.payload)
+        } else if (msg.event === 'gameOver') {
+          this.onGameOver?.(msg.payload)
+        }
+      })
+    })
+  }
+
+  call<T = { ok: boolean; error?: string }>(event: string, payload?: unknown): Promise<T> {
+    const id = this.nextId++
+    return new Promise((resolve) => {
+      this.pending.set(id, resolve as (ack: unknown) => void)
+      this.ws.send(JSON.stringify({ t: 'call', id, event, payload }))
+    })
+  }
+
+  close() {
+    this.ws.close()
+  }
 }
 
 async function main() {
-  console.log(`Playtest: ${mode} / ${preset} board / ${Math.round(ACCURACY * 100)}% accuracy\n`)
+  console.log(`Playtest: ${mode} / ${preset} board / ${Math.round(ACCURACY * 100)}% accuracy`)
+  console.log(`Target: ${BASE}\n`)
+
+  const answerKey = await fetchAnswerKey()
+  console.log(`answer key: ${answerKey.size} questions`)
 
   const names = ['Ana', 'Ben', 'Cleo', 'Dev']
   const ids = await Promise.all(names.map(createPlayer))
-  const sockets = await Promise.all(names.map(() => connect()))
-  const before = ids.map((id) => getPlayer(id)!)
+  const before = await Promise.all(ids.map(getPlayer))
 
-  const created = await ask<{ ok: boolean; error?: string; data?: { code: string } }>(
-    sockets[0],
-    'createRoom',
-    { playerId: ids[0], mode, preset },
-  )
-  if (!created.ok) throw new Error(`createRoom failed: ${created.error}`)
-  const code = created.data!.code
+  const roomRes = await fetch(`${BASE}/api/rooms`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ playerId: ids[0], mode, preset }),
+  })
+  const { code, error } = await roomRes.json()
+  if (!code) throw new Error(`createRoom failed: ${error}`)
   console.log(`room ${code}`)
 
-  for (let i = 1; i < 4; i++) {
-    const joined = await ask<{ ok: boolean; error?: string }>(sockets[i], 'joinRoom', {
-      playerId: ids[i],
-      code,
-    })
-    if (!joined.ok) throw new Error(`join failed for ${names[i]}: ${joined.error}`)
-    await ask(sockets[i], 'setReady', { ready: true })
-  }
-
-  const finished = new Promise<{ winner: Winner; summary: GameSummaryRow[] }>((resolve) => {
-    sockets[0].on('gameOver', resolve)
-  })
+  const clients = names.map((n, i) => new Client(n, ids[i]))
+  for (const client of clients) await client.connect(code)
+  for (const client of clients.slice(1)) await client.call('setReady', { ready: true })
 
   let turns = 0
   let rolls = 0
-  let correctAnswers = 0
-  let captures = 0
   const seen = new Set<number>()
   const tierCount = new Map<number, number>()
 
-  // Every bot listens; each acts only when it is its own turn, exactly like a player.
-  sockets.forEach((socket, seat) => {
+  const finished = new Promise<never>((resolve) => {
+    clients[0].onGameOver = resolve
+  })
+
+  clients.forEach((client, seat) => {
     let handledQuestion = -1
     let handledChoice = ''
-
-    socket.on('game', (game: GameState) => {
+    client.onGame = (game) => {
       if (game.turnSeat !== seat || game.phase === 'game-over') return
 
       if (game.phase === 'awaiting-roll') {
         turns++
-        socket.emit('roll', () => {})
+        if (turns % 15 === 0) console.log(`  …${turns} turns`)
+        void client.call('roll')
         return
       }
-
       if (game.phase === 'answering' && game.question && game.question.id !== handledQuestion) {
         handledQuestion = game.question.id
         rolls++
         seen.add(game.question.id)
         tierCount.set(game.question.tier, (tierCount.get(game.question.tier) ?? 0) + 1)
-
-        const truth = getQuestion(game.question.id)!.answer
-        const wantCorrect = Math.random() < ACCURACY
-        const letter: AnswerLetter = wantCorrect
-          ? truth
-          : ANSWER_LETTERS.filter((l) => l !== truth)[Math.floor(Math.random() * 3)]
-        if (wantCorrect) correctAnswers++
-        setTimeout(() => socket.emit('answer', { letter }, () => {}), 20)
+        const truth = answerKey.get(game.question.id)!
+        const letter: AnswerLetter =
+          Math.random() < ACCURACY
+            ? truth
+            : ANSWER_LETTERS.filter((l) => l !== truth)[Math.floor(Math.random() * 3)]
+        setTimeout(() => void client.call('answer', { letter }), 20)
         return
       }
-
       if (game.phase === 'choosing-piece' && game.choices.length > 0) {
         const key = `${game.choices.join()}-${game.log.length}`
         if (key === handledChoice) return
         handledChoice = key
         const pick = game.choices[Math.floor(Math.random() * game.choices.length)]
-        setTimeout(() => socket.emit('choosePiece', { pieceId: pick }, () => {}), 20)
+        setTimeout(() => void client.call('choosePiece', { pieceId: pick }), 20)
       }
-    })
-
+    }
   })
 
-  // One observer counts captures, deduped by the serialised result: the same turn is
-  // broadcast several times (resolve, then end-of-turn), but always identically.
-  const countedResults = new Set<string>()
-  sockets[0].on('game', (game: GameState) => {
-    if (!game.lastResult) return
-    const fingerprint = JSON.stringify(game.lastResult)
-    if (countedResults.has(fingerprint)) return
-    countedResults.add(fingerprint)
-    captures += game.lastResult.captured.length
-  })
-
-  const started = await ask<{ ok: boolean; error?: string }>(sockets[0], 'startGame')
+  const started = await clients[0].call<{ ok: boolean; error?: string }>('startGame')
   if (!started.ok) throw new Error(`startGame failed: ${started.error}`)
 
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Game did not finish within 5 minutes')), 300000),
-  )
-  const result = await Promise.race([finished, timeout])
+  const result: never = await Promise.race([
+    finished,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Game did not finish within 15 minutes')), 900000),
+    ),
+  ])
+  const { winner, summary } = result as unknown as {
+    winner: { type: string; seat?: number; team?: number }
+    summary: Array<{ playerId: string; name: string; score: number; answered: number; correct: number; piecesHome: number; won: boolean }>
+  }
 
   console.log(`\nfinished after ${turns} turns, ${rolls} questions`)
   console.log(`distinct questions drawn: ${seen.size}`)
   console.log(
-    `tier spread (die face -> times drawn): ${[...tierCount].sort().map(([t, n]) => `${t}:${n}`).join(' ')}`,
+    `tier spread: ${[...tierCount].sort().map(([t, n]) => `${t}:${n}`).join(' ')}`,
   )
-  console.log(`captures: ${captures}`)
-  console.log(
-    `winner: ${result.winner.type === 'player' ? `seat ${result.winner.seat}` : `team ${result.winner.team}`}`,
-  )
+  console.log(`winner: ${JSON.stringify(winner)}`)
   console.table(
-    result.summary.map((r) => ({
+    summary.map((r) => ({
       name: r.name,
-      team: r.team,
       score: r.score,
       correct: `${r.correct}/${r.answered}`,
       home: `${r.piecesHome}/2`,
@@ -168,27 +212,28 @@ async function main() {
     })),
   )
 
-  // The leaderboard is the point of all this, so check it actually moved.
+  // Wait a beat for the D1 write, then check the leaderboard actually moved.
+  await new Promise((r) => setTimeout(r, 800))
   console.log('\nleaderboard deltas:')
   let allGood = true
-  ids.forEach((id, i) => {
-    const after = getPlayer(id)!
-    const row = result.summary.find((r) => r.playerId === id)!
-    const scoreOk = after.totalScore - before[i].totalScore === row.score
-    const gamesOk = after.gamesPlayed - before[i].gamesPlayed === 1
-    const winsOk = after.wins - before[i].wins === (row.won ? 1 : 0)
-    const answeredOk = after.answered - before[i].answered === row.answered
-    if (!scoreOk || !gamesOk || !winsOk || !answeredOk) allGood = false
+  for (const [i, id] of ids.entries()) {
+    const after = await getPlayer(id)
+    const row = summary.find((r) => r.playerId === id)!
+    const ok =
+      after.totalScore - before[i].totalScore === row.score &&
+      after.gamesPlayed - before[i].gamesPlayed === 1 &&
+      after.wins - before[i].wins === (row.won ? 1 : 0) &&
+      after.answered - before[i].answered === row.answered
+    if (!ok) allGood = false
     console.log(
-      `  ${names[i].padEnd(5)} score +${after.totalScore - before[i].totalScore} ` +
-        `games +${after.gamesPlayed - before[i].gamesPlayed} ` +
-        `wins +${after.wins - before[i].wins} ` +
-        `answered +${after.answered - before[i].answered} ` +
-        `${scoreOk && gamesOk && winsOk && answeredOk ? 'OK' : 'MISMATCH'}`,
+      `  ${names[i].padEnd(5)} score +${after.totalScore - before[i].totalScore}` +
+        ` games +${after.gamesPlayed - before[i].gamesPlayed}` +
+        ` wins +${after.wins - before[i].wins}` +
+        ` answered +${after.answered - before[i].answered}  ${ok ? 'OK' : 'MISMATCH'}`,
     )
-  })
+  }
 
-  sockets.forEach((s) => s.close())
+  clients.forEach((c) => c.close())
   console.log(allGood ? '\nPASS' : '\nFAIL: leaderboard did not match the game summary')
   process.exit(allGood ? 0 : 1)
 }

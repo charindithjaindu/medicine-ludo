@@ -4,22 +4,25 @@
   "version": "0.1.0",
   "type": "module",
   "workspaces": [
-    "server",
-    "client"
+    "client",
+    "worker"
   ],
   "scripts": {
-    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "npm run dev -w server",
+    "predev": "npm run build -w client",
+    "dev": "concurrently -n worker,client -c cyan,magenta \"npm:dev:worker\" \"npm:dev:client\"",
+    "dev:worker": "npm run dev -w worker",
     "dev:client": "npm run dev -w client",
     "build": "npm run build -w client",
+    "deploy": "npm run build -w client && npm run deploy -w worker",
+    "cf:init": "tsx scripts/cf-init.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "import:pdf": "tsx scripts/import-pdf.ts",
-    "playtest": "tsx scripts/playtest.ts",
-    "bots": "tsx scripts/bots.ts"
+    "playtest": "tsx scripts/playtest.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   }
