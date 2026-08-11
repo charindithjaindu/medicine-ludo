@@ -1,0 +1,26 @@
+{
+  "name": "medicine-ludo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w client",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "import:pdf": "tsx scripts/import-pdf.ts",
+    "playtest": "tsx scripts/playtest.ts",
+    "bots": "tsx scripts/bots.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
