@@ -12,6 +12,7 @@ import {
   type Winner,
 } from '@shared/types.js'
 import { boardConfig, SEAT_COLORS, TEAM_NAMES } from '@shared/board.js'
+import { answerBeat, moveBeat } from '@shared/feedback.js'
 import Board from '../components/Board.tsx'
 import Dice from '../components/Dice.tsx'
 import Confetti from '../components/Confetti.tsx'
@@ -93,6 +94,7 @@ export default function Game({
           <div className="mx-auto w-full" style={{ maxWidth: 'min(100%, 58vh)' }}>
             <Board
               game={game}
+              viewSeat={mySeat}
               choices={myTurn && game.phase === 'choosing-piece' ? game.choices : []}
               onPick={(pieceId) => {
                 audio.play('click')
@@ -143,14 +145,15 @@ export default function Game({
 
 /**
  * Watches the game state and fires audio/visual feedback on the transitions that
- * matter. Results are de-duplicated by fingerprint because the same turn is
- * broadcast several times (resolve, then end of turn).
+ * matter. One turn is broadcast several times, so each reaction is de-duplicated
+ * against the beat it belongs to — see shared/src/feedback.ts.
  */
 function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
   const [burst, setBurst] = useState(0)
   const [shower, setShower] = useState(0)
   const [flash, setFlash] = useState<'good' | 'bad' | null>(null)
-  const seenResult = useRef<string>('')
+  const seenAnswer = useRef<string>('')
+  const seenMove = useRef<string>('')
   const seenRoll = useRef<string>('')
   const wonRef = useRef(false)
 
@@ -165,12 +168,18 @@ function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
     }
   }, [game.phase, game.question, game.turnSeat])
 
+  /**
+   * The celebration belongs to the *answer*, so it is keyed on the answer alone.
+   * Keying it on the whole result meant a second, identical celebration once the
+   * player picked a piece: the same result arrives again with movedPieceId filled
+   * in, which looked like a fresh event.
+   */
   useEffect(() => {
     const r = game.lastResult
     if (!r) return
-    const fingerprint = `${r.seat}-${r.questionId}-${r.chosen}-${r.movedPieceId}-${r.captured.length}`
-    if (seenResult.current === fingerprint) return
-    seenResult.current = fingerprint
+    const answered = answerBeat(r)
+    if (seenAnswer.current === answered) return
+    seenAnswer.current = answered
 
     if (r.wasCorrect) {
       audio.play('correct')
@@ -180,11 +189,20 @@ function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
       audio.play('wrong')
       setFlash('bad')
     }
-    if (r.captured.length > 0) setTimeout(() => audio.play('capture'), 260)
-    if (r.reachedHome) setTimeout(() => audio.play('home'), 380)
-
     const clear = setTimeout(() => setFlash(null), 620)
     return () => clearTimeout(clear)
+  }, [game.lastResult])
+
+  /** What the move earned is a separate beat, and only lands once a piece has moved. */
+  useEffect(() => {
+    const r = game.lastResult
+    const moved = r ? moveBeat(r) : null
+    if (!r || !moved) return
+    if (seenMove.current === moved) return
+    seenMove.current = moved
+
+    if (r.captured.length > 0) audio.play('capture')
+    if (r.reachedHome) setTimeout(() => audio.play('home'), 200)
   }, [game.lastResult])
 
   useEffect(() => {

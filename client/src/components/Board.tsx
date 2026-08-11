@@ -16,6 +16,35 @@ import type { GameState } from '@shared/types.js'
 
 const key = (c: Cell) => `${c.row},${c.col}`
 
+/**
+ * Rotate a cell a quarter turn clockwise, `times` times, within a square grid.
+ * Positions only — pawns and text are placed afterwards, so nothing ends up
+ * upside down the way a CSS transform on the whole board would leave it.
+ */
+function rotateCell(cell: Cell, times: number, side: number): Cell {
+  let { row, col } = cell
+  for (let i = 0; i < times; i++) {
+    const previousRow = row
+    row = col
+    col = side - 1 - previousRow
+  }
+  return { row, col }
+}
+
+function rotateRect(
+  rect: { row: number; col: number; size: number },
+  times: number,
+  side: number,
+): { row: number; col: number; size: number } {
+  const a = rotateCell({ row: rect.row, col: rect.col }, times, side)
+  const b = rotateCell(
+    { row: rect.row + rect.size - 1, col: rect.col + rect.size - 1 },
+    times,
+    side,
+  )
+  return { row: Math.min(a.row, b.row), col: Math.min(a.col, b.col), size: rect.size }
+}
+
 type Painted =
   | { kind: 'path'; row: number; col: number; start?: number; tip?: number }
   | { kind: 'home'; row: number; col: number; seat: number }
@@ -31,10 +60,13 @@ type Painted =
  */
 export default function Board({
   game,
+  viewSeat = 0,
   choices = [],
   onPick,
 }: {
   game: GameState
+  /** Whose point of view. That seat is always drawn in the bottom-left corner. */
+  viewSeat?: number
   choices?: string[]
   onPick?: (pieceId: string) => void
 }) {
@@ -42,16 +74,22 @@ export default function Board({
   const step = 100 / b.side
   const pct = (n: number) => `${n * step}%`
 
+  // Yards run clockwise from the top-right: seat 0, 1, 2, 3. Bottom-left is the
+  // third of those, so turn the board until the viewer's seat lands there.
+  const quarter = (2 - (viewSeat < 0 ? 0 : viewSeat) + 4) % 4
+  const spin = (cell: Cell) => rotateCell(cell, quarter, b.side)
+
   const painted: Painted[] = []
 
   const startAt = new Map<number, number>()
   for (let seat = 0; seat < 4; seat++) startAt.set(startIndex(seat, b), seat)
 
   ringCells(b).forEach((cell, index) => {
+    const { row, col } = spin(cell)
     painted.push({
       kind: 'path',
-      row: cell.row,
-      col: cell.col,
+      row,
+      col,
       start: startAt.get(index),
       tip: tipOwner(index, b) ?? undefined,
     })
@@ -59,13 +97,18 @@ export default function Board({
 
   for (let seat = 0; seat < 4; seat++) {
     for (const cell of homeColumnCells(seat, b)) {
-      painted.push({ kind: 'home', row: cell.row, col: cell.col, seat })
+      const { row, col } = spin(cell)
+      painted.push({ kind: 'home', row, col, seat })
     }
   }
 
   // Group pieces by cell so a stack fans out instead of hiding behind itself.
   const tokens = game.players.flatMap((p) =>
-    p.pieces.map((piece) => ({ piece, seat: p.seat, cell: cellFor(p.seat, piece.progress, b) })),
+    p.pieces.map((piece) => ({
+      piece,
+      seat: p.seat,
+      cell: spin(cellFor(p.seat, piece.progress, b)),
+    })),
   )
   const stacks = new Map<string, number>()
   const placed = tokens.map((t) => {
@@ -75,7 +118,7 @@ export default function Board({
     return { ...t, index }
   })
 
-  const centre = centreBlock(b)
+  const centre = rotateRect(centreBlock(b), quarter, b.side)
 
   return (
     <div className="panel relative aspect-square w-full select-none p-2.5">
@@ -84,7 +127,7 @@ export default function Board({
       <div className="relative h-full w-full rounded-lg bg-[#f2ede0]">
         {/* Corner yards */}
         {[0, 1, 2, 3].map((seat) => {
-          const rect = yardRect(seat, b)
+          const rect = rotateRect(yardRect(seat, b), quarter, b.side)
           return (
             <div
               key={`yard-${seat}`}
@@ -97,7 +140,9 @@ export default function Board({
               }}
             >
               <div
-                className="grid h-full w-full place-items-center rounded-lg border-[3px] border-ink"
+                className={`grid h-full w-full place-items-center rounded-lg border-[3px] border-ink ${
+                  seat === viewSeat ? 'ring-4 ring-amber-300' : ''
+                }`}
                 style={{ backgroundColor: SEAT_COLORS[seat] }}
               >
                 <div className="grid h-[62%] w-[62%] place-items-center rounded-md bg-white/85">
@@ -134,7 +179,7 @@ export default function Board({
             height: pct(centre.size),
           }}
         >
-          <HomeTriangles />
+          <HomeTriangles quarter={quarter} />
         </div>
 
         {/* Pieces */}
@@ -151,7 +196,7 @@ export default function Board({
               aria-label={`${game.players[t.seat]?.name ?? 'Player'} piece`}
               className={`absolute transition-all duration-500 ease-out ${
                 pickable
-                  ? 'z-30 cursor-pointer hover:scale-115'
+                  ? 'z-30 animate-bob cursor-pointer scale-125 hover:scale-140'
                   : isActive
                     ? 'z-20 animate-throb'
                     : 'z-10 cursor-default'
@@ -207,14 +252,18 @@ function CellFace({ cell }: { cell: Painted }) {
   return <div className="h-full w-full border-[1.5px] border-ink/30 bg-white" />
 }
 
-/** Seat 0 arrives from the top, 1 from the right, 2 from the bottom, 3 from the left. */
-function HomeTriangles() {
+/**
+ * Unrotated, seat 0 arrives from the top, 1 from the right, 2 from the bottom and
+ * 3 from the left. Turning the board moves which seat feeds which wedge.
+ */
+function HomeTriangles({ quarter }: { quarter: number }) {
+  const seatAt = (side: number) => (side - quarter + 4) % 4
   return (
     <svg viewBox="0 0 100 100" className="h-full w-full">
-      <polygon points="0,0 100,0 50,50" fill={SEAT_COLORS[0]} />
-      <polygon points="100,0 100,100 50,50" fill={SEAT_COLORS[1]} />
-      <polygon points="100,100 0,100 50,50" fill={SEAT_COLORS[2]} />
-      <polygon points="0,100 0,0 50,50" fill={SEAT_COLORS[3]} />
+      <polygon points="0,0 100,0 50,50" fill={SEAT_COLORS[seatAt(0)]} />
+      <polygon points="100,0 100,100 50,50" fill={SEAT_COLORS[seatAt(1)]} />
+      <polygon points="100,100 0,100 50,50" fill={SEAT_COLORS[seatAt(2)]} />
+      <polygon points="0,100 0,0 50,50" fill={SEAT_COLORS[seatAt(3)]} />
       <rect
         x="1"
         y="1"
@@ -233,10 +282,39 @@ function HomeTriangles() {
 function Pawn({ color, highlighted }: { color: string; highlighted: boolean }) {
   return (
     <svg viewBox="0 0 32 44" className="h-full w-full overflow-visible">
+      {/* A pickable piece has to read instantly against a busy board: a solid amber
+          disc, a hard ring, and a pulse — not a faint tint. */}
       {highlighted && (
-        <circle cx="16" cy="24" r="19" fill="#fbbf24" opacity="0.45">
-          <animate attributeName="r" values="16;21;16" dur="1.4s" repeatCount="indefinite" />
-        </circle>
+        <>
+          <circle cx="16" cy="25" r="22" fill="#fbbf24" opacity="0.55">
+            <animate
+              attributeName="opacity"
+              values="0.55;0.15;0.55"
+              dur="0.9s"
+              repeatCount="indefinite"
+            />
+            <animate attributeName="r" values="20;25;20" dur="0.9s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="16" cy="25" r="19" fill="#fde68a" opacity="0.9" />
+          <circle
+            cx="16"
+            cy="25"
+            r="19"
+            fill="none"
+            stroke="#16123a"
+            strokeWidth="2.5"
+            strokeDasharray="5 3"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 16 25"
+              to="360 16 25"
+              dur="4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        </>
       )}
       {/* Contact shadow on the square below */}
       <ellipse cx="16" cy="39.5" rx="11" ry="3.4" fill="#16123a" opacity="0.28" />
