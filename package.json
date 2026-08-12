@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "import:pdf": "tsx scripts/import-pdf.ts",
-    "playtest": "tsx scripts/playtest.ts"
+    "playtest": "tsx scripts/playtest.ts",
+    "print:board": "tsx scripts/print-board.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

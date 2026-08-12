@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm"
+     viewBox="0 0 210 297">
+  <rect width="210" height="297" fill="#ffffff"/>
+  <text x="105" y="21" text-anchor="middle"
+        font-family="Helvetica,Arial,sans-serif" font-size="7.5" font-weight="bold"
+        fill="#16123a">MEDICINE LUDO</text>
+  <text x="105" y="26.5" text-anchor="middle"
+        font-family="Helvetica,Arial,sans-serif" font-size="3.4" fill="#16123a" fill-opacity="0.65">
+    Roll the die · answer the card · race home — quick board, A4
+  </text>
+<rect x="144" y="32" width="52" height="52" rx="4.68"
+         fill="#e11d48" stroke="#16123a" stroke-width="0.9"/>
+<rect x="152.84" y="40.84" width="34.32"
+         height="34.32" rx="3.12" fill="#fffdf5" stroke="#16123a" stroke-width="0.6"/>
+<circle cx="162.72" cy="53.84" r="5.46"
+           fill="none" stroke="#e11d48" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<circle cx="177.28" cy="53.84" r="5.46"
+           fill="none" stroke="#e11d48" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<text x="170" y="71.52" text-anchor="middle"
+         font-family="Helvetica,Arial,sans-serif" font-size="7.8" font-weight="bold"
+         fill="#e11d48">RED</text>
+<rect x="144" y="162" width="52" height="52" rx="4.68"
+         fill="#0891b2" stroke="#16123a" stroke-width="0.9"/>
+<rect x="152.84" y="170.84" width="34.32"
+         height="34.32" rx="3.12" fill="#fffdf5" stroke="#16123a" stroke-width="0.6"/>
+<circle cx="162.72" cy="183.84" r="5.46"
+           fill="none" stroke="#0891b2" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<circle cx="177.28" cy="183.84" r="5.46"
+           fill="none" stroke="#0891b2" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<text x="170" y="201.52" text-anchor="middle"
+         font-family="Helvetica,Arial,sans-serif" font-size="7.8" font-weight="bold"
+         fill="#0891b2">CYAN</text>
+<rect x="14" y="162" width="52" height="52" rx="4.68"
+         fill="#16a34a" stroke="#16123a" stroke-width="0.9"/>
+<rect x="22.84" y="170.84" width="34.32"
+         height="34.32" rx="3.12" fill="#fffdf5" stroke="#16123a" stroke-width="0.6"/>
+<circle cx="32.72" cy="183.84" r="5.46"
+           fill="none" stroke="#16a34a" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<circle cx="47.28" cy="183.84" r="5.46"
+           fill="none" stroke="#16a34a" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<text x="40" y="201.52" text-anchor="middle"
+         font-family="Helvetica,Arial,sans-serif" font-size="7.8" font-weight="bold"
+         fill="#16a34a">GREEN</text>
+<rect x="14" y="32" width="52" height="52" rx="4.68"
+         fill="#f59e0b" stroke="#16123a" stroke-width="0.9"/>
+<rect x="22.84" y="40.84" width="34.32"
+         height="34.32" rx="3.12" fill="#fffdf5" stroke="#16123a" stroke-width="0.6"/>
+<circle cx="32.72" cy="53.84" r="5.46"
+           fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<circle cx="47.28" cy="53.84" r="5.46"
+           fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+<text x="40" y="71.52" text-anchor="middle"
+         font-family="Helvetica,Arial,sans-serif" font-size="7.8" font-weight="bold"
+         fill="#f59e0b">AMBER</text>
+<rect x="66" y="58" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="79,64.24 83.57,75.98 79,73.37 74.43,75.98"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="66" y="32" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="85.76,45 74.02,49.57 76.63,45 74.02,40.43"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="92" y="32" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<rect x="92" y="32" width="26" height="26"
+           fill="#e11d48" fill-opacity="0.28" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="105,52.8 99.73,39.25 105,42.27 110.27,39.25"
+           fill="#e11d48"/>
+<rect x="118" y="32" width="26" height="26"
+         fill="#e11d48" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="131,36.16 132.93,41.31 138.42,41.55 134.12,44.97 135.58,50.27 131,47.24 126.42,50.27 127.88,44.97 123.58,41.55 129.07,41.31" fill="#ffffff" fill-opacity="0.95"/>
+<text x="131" y="54.88" text-anchor="middle"
+           font-family="Helvetica,Arial,sans-serif" font-size="4.42" font-weight="bold"
+           fill="#ffffff">START</text>
+<rect x="118" y="58" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="135.78,75.78 124.25,70.7 129.33,69.33 130.7,64.25"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="144" y="84" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="163.76,97 152.02,101.57 154.63,97 152.02,92.43"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="170" y="84" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="183,103.76 178.43,92.02 183,94.63 187.57,92.02"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="170" y="110" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<rect x="170" y="110" width="26" height="26"
+           fill="#0891b2" fill-opacity="0.28" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="175.2,123 188.75,117.73 185.73,123 188.75,128.27"
+           fill="#0891b2"/>
+<rect x="170" y="136" width="26" height="26"
+         fill="#0891b2" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="183,140.16 184.93,145.31 190.42,145.55 186.12,148.97 187.58,154.27 183,151.24 178.42,154.27 179.88,148.97 175.58,145.55 181.07,145.31" fill="#ffffff" fill-opacity="0.95"/>
+<text x="183" y="158.88" text-anchor="middle"
+           font-family="Helvetica,Arial,sans-serif" font-size="4.42" font-weight="bold"
+           fill="#ffffff">START</text>
+<rect x="144" y="136" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="152.22,153.78 157.3,142.25 158.67,147.33 163.75,148.7"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="118" y="162" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="131,181.76 126.43,170.02 131,172.63 135.57,170.02"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="118" y="188" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="124.24,201 135.98,196.43 133.37,201 135.98,205.57"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="92" y="188" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<rect x="92" y="188" width="26" height="26"
+           fill="#16a34a" fill-opacity="0.28" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="105,193.2 110.27,206.75 105,203.73 99.73,206.75"
+           fill="#16a34a"/>
+<rect x="66" y="188" width="26" height="26"
+         fill="#16a34a" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="79,192.16 80.93,197.31 86.42,197.55 82.12,200.97 83.58,206.27 79,203.24 74.42,206.27 75.88,200.97 71.58,197.55 77.07,197.31" fill="#ffffff" fill-opacity="0.95"/>
+<text x="79" y="210.88" text-anchor="middle"
+           font-family="Helvetica,Arial,sans-serif" font-size="4.42" font-weight="bold"
+           fill="#ffffff">START</text>
+<rect x="66" y="162" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="74.22,170.22 85.75,175.3 80.67,176.67 79.3,181.75"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="40" y="136" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="46.24,149 57.98,144.43 55.37,149 57.98,153.57"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="14" y="136" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="27,142.24 31.57,153.98 27,151.37 22.43,153.98"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="14" y="110" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<rect x="14" y="110" width="26" height="26"
+           fill="#f59e0b" fill-opacity="0.28" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="34.8,123 21.25,128.27 24.27,123 21.25,117.73"
+           fill="#f59e0b"/>
+<rect x="14" y="84" width="26" height="26"
+         fill="#f59e0b" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="27,88.16 28.93,93.31 34.42,93.55 30.12,96.97 31.58,102.27 27,99.24 22.42,102.27 23.88,96.97 19.58,93.55 25.07,93.31" fill="#ffffff" fill-opacity="0.95"/>
+<text x="27" y="106.88" text-anchor="middle"
+           font-family="Helvetica,Arial,sans-serif" font-size="4.42" font-weight="bold"
+           fill="#ffffff">START</text>
+<rect x="40" y="84" width="26" height="26"
+         fill="#ffffff" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="57.78,92.22 52.7,103.75 51.33,98.67 46.25,97.3"
+           fill="#16123a" fill-opacity="0.3"/>
+<rect x="92" y="58" width="26" height="26"
+           fill="#e11d48" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="105,77.76 100.43,66.02 105,68.63 109.57,66.02"
+           fill="#ffffff" fill-opacity="0.75"/>
+<rect x="144" y="110" width="26" height="26"
+           fill="#0891b2" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="150.24,123 161.98,118.43 159.37,123 161.98,127.57"
+           fill="#ffffff" fill-opacity="0.75"/>
+<rect x="92" y="162" width="26" height="26"
+           fill="#16a34a" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="105,168.24 109.57,179.98 105,177.37 100.43,179.98"
+           fill="#ffffff" fill-opacity="0.75"/>
+<rect x="40" y="110" width="26" height="26"
+           fill="#f59e0b" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="59.76,123 48.02,127.57 50.63,123 48.02,118.43"
+           fill="#ffffff" fill-opacity="0.75"/>
+<polygon points="66,84 144,84 105,123" fill="#e11d48" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="144,84 144,162 105,123" fill="#0891b2" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="144,162 66,162 105,123" fill="#16a34a" stroke="#16123a" stroke-width="0.7"/>
+<polygon points="66,162 66,84 105,123" fill="#f59e0b" stroke="#16123a" stroke-width="0.7"/>
+<rect x="82.9" y="115.2" width="44.2"
+       height="15.6" rx="3.64" fill="#ffffff" stroke="#16123a" stroke-width="0.8"/>
+<text x="105" y="126.38" text-anchor="middle"
+       font-family="Helvetica,Arial,sans-serif" font-size="8.32" font-weight="bold"
+       fill="#16123a">HOME</text>
+<rect x="14" y="32" width="182" height="182"
+       fill="none" stroke="#16123a" stroke-width="1.6"/>
+<text x="14" y="226" font-family="Helvetica,Arial,sans-serif"
+       font-size="4" font-weight="bold" fill="#16123a">THE NUMBER YOU ROLL IS ALSO THE DIFFICULTY OF THE CARD</text>
+<rect x="14" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="27.92" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">1</text>
+<text x="27.92" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Easy</text>
+<text x="27.92" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">10 pts · 20s</text>
+<rect x="44.33" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="58.25" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">2</text>
+<text x="58.25" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Mid Easy</text>
+<text x="58.25" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">20 pts · 25s</text>
+<rect x="74.67" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="88.58" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">3</text>
+<text x="88.58" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Medium</text>
+<text x="88.58" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">30 pts · 30s</text>
+<rect x="105" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="118.92" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">4</text>
+<text x="118.92" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Mid Medium</text>
+<text x="118.92" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">40 pts · 30s</text>
+<rect x="135.33" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="149.25" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">5</text>
+<text x="149.25" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Difficult</text>
+<text x="149.25" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">50 pts · 40s</text>
+<rect x="165.67" y="231" width="27.83" height="16" rx="1.8"
+         fill="none" stroke="#16123a" stroke-width="0.7"/>
+<text x="179.58" y="238" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="6" font-weight="bold" fill="#16123a">6</text>
+<text x="179.58" y="242.2" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.9" fill="#16123a">Very Difficult</text>
+<text x="179.58" y="245.6" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+         font-size="2.6" fill="#16123a" fill-opacity="0.65">60 pts · 45s</text>
+<text x="14" y="254" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">ROLL — the die gives both your distance and your card. Answer right and move forward by the roll; answer wrong</text>
+<text x="14" y="258.3" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">and move back half the roll, rounded down, never past your own START.</text>
+<text x="14" y="264.2" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">PIECES — both of yours begin on your START square. Land on a square holding only opponents and they go back to</text>
+<text x="14" y="268.5" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">their own START. The four ★ START squares are safe: nothing is captured there.</text>
+<text x="14" y="274.4" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">WINNING — roll a 6 and answer correctly to go again, at most twice running. First player to get both pieces HOME</text>
+<text x="14" y="278.7" font-family="Helvetica,Arial,sans-serif"
+           font-size="3.2" fill="#16123a">wins; in 2v2 it is the first team with two pieces home between the partners.</text>
+<text x="14" y="285.6" font-family="Helvetica,Arial,sans-serif"
+       font-size="2.7" fill="#16123a" fill-opacity="0.55">7x7 · track 20 squares · home column 1 · 26mm cells — print at 100%, do NOT "fit to page" · medicine-ludo.charindith.workers.dev</text>
+</svg>
