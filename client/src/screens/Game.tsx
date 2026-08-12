@@ -339,7 +339,7 @@ function TurnPanel({
       <Panel className="p-5 text-center">
         {myTurn ? (
           <>
-            <Dice value={null} rolling={rolling} size={110} />
+            <Dice value={null} rolling={rolling} size={110} className="mx-auto" />
             <p className="mt-4 text-xl font-semibold">Your turn!</p>
             <p className="mt-1 text-sm text-ink/60">
               The number you roll is the difficulty. A 6 offers six squares — and the hardest card.
@@ -361,7 +361,7 @@ function TurnPanel({
   if (game.phase === 'answering' && game.question) {
     return (
       <Panel className="p-5 text-center">
-        <Dice value={game.roll} rolling={rolling} size={72} />
+        <Dice value={game.roll} rolling={rolling} size={72} className="mx-auto" />
         <p className="mt-3 font-semibold">
           {myTurn ? 'Answer the question…' : `${activeName} is answering…`}
         </p>
@@ -404,7 +404,7 @@ function TurnPanel({
   if (game.lastResult) {
     return (
       <Panel className="p-5 text-center">
-        <Dice value={game.roll} size={72} />
+        <Dice value={game.roll} size={72} className="mx-auto" />
         <p
           className={`mt-3 text-xl font-bold ${
             game.lastResult.wasCorrect ? 'text-emerald-600' : 'text-rose-600'

@@ -20,10 +20,13 @@ export default function Dice({
   value,
   rolling = false,
   size = 96,
+  className = '',
 }: {
   value: number | null
   rolling?: boolean
   size?: number
+  /** The die is a fixed-width block, so centring is the caller's to ask for. */
+  className?: string
 }) {
   const [shown, setShown] = useState(value ?? 1)
 
@@ -40,10 +43,14 @@ export default function Dice({
 
   return (
     <div
-      className={`grid shrink-0 grid-cols-3 grid-rows-3 gap-[8%] rounded-2xl border-[3px] border-ink bg-cream p-[12%] shadow-[5px_5px_0_0_var(--color-ink)] ${
+      className={`grid shrink-0 grid-cols-3 grid-rows-3 rounded-2xl border-[3px] border-ink bg-cream shadow-[5px_5px_0_0_var(--color-ink)] ${
         rolling ? 'animate-tumble' : 'animate-pop-in'
-      }`}
-      style={{ width: size, height: size }}
+      } ${className}`}
+      // Padding and gap are derived from `size` rather than written as
+      // percentages: a percentage padding resolves against the *parent's* width,
+      // not the die's, so in a wide panel it swallowed the die and left the pips
+      // at zero width — a blank rounded square.
+      style={{ width: size, height: size, padding: size * 0.12, gap: size * 0.08 }}
       aria-label={`Die showing ${shown}`}
       role="img"
     >

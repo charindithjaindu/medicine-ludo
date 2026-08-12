@@ -265,7 +265,10 @@ body {
   animation: shake 480ms ease-in-out;
 }
 .animate-tumble {
-  animation: tumble 700ms cubic-bezier(0.3, 1.4, 0.5, 1);
+  /* Loops for as long as the die is rolling — a single pass left it sitting
+     still while the pips carried on flickering. 720deg meets 0deg, so it
+     repeats seamlessly. */
+  animation: tumble 700ms cubic-bezier(0.3, 1.4, 0.5, 1) infinite;
 }
 .animate-throb {
   animation: throb 1.5s ease-in-out infinite;
