@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   boardConfig,
   cellFor,
@@ -15,6 +16,65 @@ import {
 import type { GameState } from '@shared/types.js'
 
 const key = (c: Cell) => `${c.row},${c.col}`
+
+/** How long a piece spends on each square it passes through. */
+const STEP_MS = 190
+
+/**
+ * The largest jump that counts as walking. A die roll moves at most six; anything
+ * bigger is a capture sending a piece home from across the board, and marching it
+ * backwards around the whole ring would be nonsense.
+ */
+const MAX_WALK = 6
+
+/**
+ * Pieces travel their move one square at a time instead of sliding straight from
+ * origin to destination.
+ *
+ * Interpolating position was cheap but wrong: a six sent the pawn diagonally across
+ * the middle of the board, through the walls, arriving without ever having been on
+ * the track. Walking it is what makes a move look like a move — and it is the beat
+ * the rest of the turn is paced against.
+ */
+function useWalkingPieces(game: GameState): Map<string, number> {
+  const target = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const player of game.players) {
+      for (const piece of player.pieces) m.set(piece.id, piece.progress)
+    }
+    return m
+  }, [game.players])
+
+  const [shown, setShown] = useState(() => new Map(target))
+  const shownRef = useRef(shown)
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+
+    const tick = () => {
+      const next = new Map<string, number>()
+      let walking = false
+      for (const [id, want] of target) {
+        const have = shownRef.current.get(id)
+        if (have === undefined || have === want) {
+          next.set(id, want)
+          continue
+        }
+        const delta = want - have
+        next.set(id, Math.abs(delta) <= MAX_WALK ? have + Math.sign(delta) : want)
+        walking = true
+      }
+      shownRef.current = next
+      setShown(next)
+      if (walking) timer = setTimeout(tick, STEP_MS)
+    }
+
+    tick()
+    return () => clearTimeout(timer)
+  }, [target])
+
+  return shown
+}
 
 /**
  * Rotate a cell a quarter turn clockwise, `times` times, within a square grid.
@@ -73,6 +133,7 @@ export default function Board({
   const b = boardConfig(game.preset)
   const step = 100 / b.side
   const pct = (n: number) => `${n * step}%`
+  const walking = useWalkingPieces(game)
 
   // Yards run clockwise from the top-right: seat 0, 1, 2, 3. Bottom-left is the
   // third of those, so turn the board until the viewer's seat lands there.
@@ -104,11 +165,15 @@ export default function Board({
 
   // Group pieces by cell so a stack fans out instead of hiding behind itself.
   const tokens = game.players.flatMap((p) =>
-    p.pieces.map((piece) => ({
-      piece,
-      seat: p.seat,
-      cell: spin(cellFor(p.seat, piece.progress, b)),
-    })),
+    p.pieces.map((piece) => {
+      const at = walking.get(piece.id) ?? piece.progress
+      return {
+        piece,
+        seat: p.seat,
+        cell: spin(cellFor(p.seat, at, b)),
+        moving: at !== piece.progress,
+      }
+    }),
   )
   const stacks = new Map<string, number>()
   const placed = tokens.map((t) => {
@@ -194,12 +259,16 @@ export default function Board({
               disabled={!pickable}
               onClick={() => onPick?.(t.piece.id)}
               aria-label={`${game.players[t.seat]?.name ?? 'Player'} piece`}
-              className={`absolute transition-all duration-500 ease-out ${
-                pickable
-                  ? 'z-30 animate-bob cursor-pointer scale-125 hover:scale-140'
-                  : isActive
-                    ? 'z-20 animate-throb'
-                    : 'z-10 cursor-default'
+              // The position transition is tuned to the walk: any slower and each
+              // square blurs into the next instead of reading as a step.
+              className={`absolute transition-all duration-200 ease-linear ${
+                t.moving
+                  ? 'z-40'
+                  : pickable
+                    ? 'z-30 animate-bob cursor-pointer scale-125 hover:scale-140'
+                    : isActive
+                      ? 'z-20 animate-throb'
+                      : 'z-10 cursor-default'
               }`}
               style={{
                 left: `calc(${pct(t.cell.col)} + ${spread}% + ${step * 0.1}%)`,
@@ -208,7 +277,11 @@ export default function Board({
                 height: `${step * 1.15}%`,
               }}
             >
-              <Pawn color={SEAT_COLORS[t.seat]} highlighted={pickable} />
+              {/* The hop lives on an inner wrapper: the button's own transform is
+                  already spoken for by the bob, throb and pick-me scale. */}
+              <span className={`block h-full w-full ${t.moving ? 'animate-step-hop' : ''}`}>
+                <Pawn color={SEAT_COLORS[t.seat]} highlighted={pickable} />
+              </span>
             </button>
           )
         })}

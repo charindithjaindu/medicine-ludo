@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { TIER_NAMES, TIERS, type Question, type Tier } from '@shared/types.js'
+import {
+  DIFFICULTIES,
+  DIFFICULTY_EMOJI,
+  DIFFICULTY_NAMES,
+  TIER_NAMES,
+  TIERS,
+  type Difficulty,
+  type Question,
+  type Tier,
+} from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
 import QuestionEditor from './QuestionEditor.tsx'
 import ImportExport from './ImportExport.tsx'
@@ -72,7 +81,9 @@ type SortKey = 'default' | 'rate' | 'asked'
 function Console({ onOut }: { onOut: () => void }) {
   const [questions, setQuestions] = useState<Question[]>([])
   const [counts, setCounts] = useState<Record<Tier, number> | null>(null)
+  const [difficultyCounts, setDifficultyCounts] = useState<Record<Difficulty, number> | null>(null)
   const [tier, setTier] = useState<Tier | ''>('')
+  const [difficulty, setDifficulty] = useState<Difficulty | ''>('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('default')
@@ -84,16 +95,17 @@ function Console({ onOut }: { onOut: () => void }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await adminApi.questions({ tier, active: activeFilter, search })
+      const r = await adminApi.questions({ tier, difficulty, active: activeFilter, search })
       setQuestions(r.questions)
       setCounts(r.counts)
+      setDifficultyCounts(r.difficultyCounts)
       setError(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [tier, activeFilter, search])
+  }, [tier, difficulty, activeFilter, search])
 
   useEffect(() => {
     const t = setTimeout(load, search ? 250 : 0)
@@ -171,6 +183,31 @@ function Console({ onOut }: { onOut: () => void }) {
           </div>
         )}
 
+        {difficultyCounts && (
+          <div className="grid grid-cols-3 gap-2">
+            {DIFFICULTIES.map((d) => (
+              <button
+                key={d}
+                onClick={() => setDifficulty(difficulty === d ? '' : d)}
+                className={`rounded-lg px-2 py-2 text-left text-xs ring-1 transition ${
+                  difficulty === d
+                    ? 'bg-slate-900 text-white ring-slate-900'
+                    : difficultyCounts[d] === 0
+                      ? 'bg-rose-50 ring-rose-300'
+                      : 'bg-white ring-slate-200 hover:ring-slate-400'
+                }`}
+              >
+                <span className="block font-semibold">
+                  {DIFFICULTY_EMOJI[d]} {DIFFICULTY_NAMES[d]}
+                </span>
+                <span className={difficulty === d ? 'text-slate-300' : 'text-slate-500'}>
+                  {difficultyCounts[d]} active · a room can pick this
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {error && (
           <p className="rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700 ring-1 ring-rose-200">
             {error}
@@ -219,6 +256,7 @@ function Console({ onOut }: { onOut: () => void }) {
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2.5">Tier</th>
+                    <th className="px-3 py-2.5">Difficulty</th>
                     <th className="px-3 py-2.5">Question</th>
                     <th className="px-3 py-2.5 text-center">Ans</th>
                     <th className="px-3 py-2.5 text-center">Asked</th>
@@ -230,14 +268,14 @@ function Console({ onOut }: { onOut: () => void }) {
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                         Loading…
                       </td>
                     </tr>
                   )}
                   {!loading && rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                         No questions match.
                       </td>
                     </tr>
@@ -250,6 +288,11 @@ function Console({ onOut }: { onOut: () => void }) {
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">
                           {q.tier} · {TIER_NAMES[q.tier]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800">
+                          {DIFFICULTY_EMOJI[q.difficulty]} {DIFFICULTY_NAMES[q.difficulty]}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">

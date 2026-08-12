@@ -9,7 +9,7 @@
  * which does not exist on Workers. Run `npm run import:pdf -- --remote` instead.
  */
 
-import { TIERS, type Question, type Tier } from '@shared/types.js'
+import { TIERS, isDifficulty, type Difficulty, type Question, type Tier } from '@shared/types.js'
 import { validateQuestionDraft } from '@shared/validate.js'
 import { parseCsvObjects, toCsv } from './csv.js'
 import type { Db } from './db.js'
@@ -131,12 +131,18 @@ export async function handleAdmin(
   if (path === '/questions' && request.method === 'GET') {
     const tier = url.searchParams.get('tier')
     const active = url.searchParams.get('active')
+    const difficulty = url.searchParams.get('difficulty')
     const questions = await db.listQuestions({
       tier: tier ? (Number(tier) as Tier) : undefined,
+      difficulty: isDifficulty(difficulty) ? (difficulty as Difficulty) : undefined,
       active: active === null || active === 'all' ? undefined : active === 'true',
       search: url.searchParams.get('search') ?? undefined,
     })
-    return json({ questions, counts: await db.activeCountByTier() })
+    return json({
+      questions,
+      counts: await db.activeCountByTier(),
+      difficultyCounts: await db.activeCountByDifficulty(),
+    })
   }
 
   if (path === '/questions' && request.method === 'POST') {
@@ -151,6 +157,7 @@ export async function handleAdmin(
       const rows = questions.map((q) => ({
         id: q.id,
         tier: q.tier,
+        difficulty: q.difficulty,
         source_card: q.sourceCard,
         text: q.text,
         option_a: q.options[0],
@@ -211,6 +218,7 @@ export async function handleAdmin(
       const patch = (await request.json().catch(() => ({}))) as Record<string, unknown>
       const merged = {
         tier: patch.tier ?? existing.tier,
+        difficulty: patch.difficulty ?? existing.difficulty,
         text: patch.text ?? existing.text,
         options: patch.options ?? existing.options,
         answer: patch.answer ?? existing.answer,

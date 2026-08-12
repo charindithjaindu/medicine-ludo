@@ -11,7 +11,7 @@
  * open socket.
  */
 
-import type { Ack, BoardPreset, GameMode } from '@shared/types.js'
+import type { Ack, BoardPreset, Difficulty, GameMode } from '@shared/types.js'
 import type { AckMessage, ServerMessage } from '@shared/protocol.js'
 
 type Handler = (payload: never) => void
@@ -142,7 +142,12 @@ export async function emit<T = undefined>(
   payload?: unknown,
 ): Promise<Ack<T>> {
   if (event === 'createRoom') {
-    const p = payload as { playerId: string; mode: GameMode; preset: BoardPreset }
+    const p = payload as {
+      playerId: string
+      mode: GameMode
+      preset: BoardPreset
+      difficulty: Difficulty
+    }
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

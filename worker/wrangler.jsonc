@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-09-01",
 
+  // Pinned because the login sees two accounts, and a deploy that guesses wrong
+  // would stand up a second worker against an empty database. This is the one
+  // holding the medicine-ludo D1 below.
+  "account_id": "c692418b0b87c07e02c210f0540376d2",
+
   // The built client. `not_found_handling` makes /admin and /leaderboard work as
   // client-side routes instead of 404ing.
   "assets": {

@@ -7,7 +7,7 @@
 
 import { handleAdmin } from './admin.js'
 import { Db } from './db.js'
-import type { BoardPreset, GameMode } from '@shared/types.js'
+import { isDifficulty, type BoardPreset, type Difficulty, type GameMode } from '@shared/types.js'
 
 export { RoomDurableObject } from './room.js'
 
@@ -49,6 +49,7 @@ export default {
           playerId?: string
           mode?: GameMode
           preset?: BoardPreset
+          difficulty?: Difficulty
         }
         const profile = body.playerId ? await db.getPlayer(body.playerId) : null
         if (!profile) return json({ error: 'Unknown player ID' }, 400)
@@ -62,6 +63,7 @@ export default {
               code,
               mode: body.mode ?? 'ffa',
               preset: body.preset ?? 'standard',
+              difficulty: isDifficulty(body.difficulty) ? body.difficulty : 'medium',
               hostPlayerId: profile.id,
               hostName: profile.name,
             }),

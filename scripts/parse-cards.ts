@@ -12,6 +12,7 @@
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import { difficultyForTier } from '@shared/types.js'
 import type { AnswerLetter, QuestionDraft, Tier } from '@shared/types.js'
 
 const TIER_BY_NAME: Record<string, Tier> = {
@@ -181,6 +182,9 @@ export function parsePdf(pdfPath: string): ParseReport {
     cards.push({
       sourceCard: card,
       tier: q.tier,
+      // The PDF grades cards EASY through VERY DIFFICULT and nothing more, so its
+      // own tiers are the starting classification. Admins refine it from there.
+      difficulty: difficultyForTier(q.tier),
       text: q.text,
       options: opts as [string, string, string, string],
       answer: a.letter,

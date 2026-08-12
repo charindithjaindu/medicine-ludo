@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PlayerProfile, RoomView } from '@shared/types.js'
+import {
+  DIFFICULTY_EMOJI,
+  DIFFICULTY_NAMES,
+  type PlayerProfile,
+  type RoomView,
+} from '@shared/types.js'
 import { SEAT_COLORS, TEAM_NAMES } from '@shared/board.js'
 import { AI_SKILLS, AI_SKILL_BLURBS, AI_SKILL_LABELS, type AiSkill } from '@shared/ai.js'
 import { emit } from '../lib/socket.ts'
@@ -72,6 +77,9 @@ export default function Lobby({
           </span>
           <span className="rounded-full border-2 border-ink bg-cyan-200 px-3 py-1">
             {room.preset === 'quick' ? '⚡ Quick board' : '🎯 Standard board'}
+          </span>
+          <span className="rounded-full border-2 border-ink bg-violet-200 px-3 py-1">
+            {DIFFICULTY_EMOJI[room.difficulty]} {DIFFICULTY_NAMES[room.difficulty]} questions
           </span>
         </div>
       </Panel>

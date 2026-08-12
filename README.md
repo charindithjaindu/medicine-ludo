@@ -5,9 +5,13 @@ Players join a room with a 6-digit code, take turns rolling, and each roll draws
 question. Two pieces each, not four.
 
 **The die face is the question tier.** Six tiers, six faces. Roll a 6 and you are
-offered six squares — and the hardest card in the deck. Roll a 1 and it's an easy
-question for one square. That single rule gives the game its risk and reward, with
-nothing extra to explain.
+offered six squares — and the highest-stakes card. Roll a 1 and it's one square.
+That single rule gives the game its risk and reward, with nothing extra to explain.
+
+**The room picks a difficulty.** Easy, Medium or Hard is chosen when the room is
+created, and every card that room draws carries that label. The tier still sets the
+distance and the points; the difficulty decides how hard the medicine is. So a table
+of first-years and a table of finalists play the same game on different questions.
 
 ---
 
@@ -17,6 +21,7 @@ nothing extra to explain.
 npm install
 npm run dev            # Worker on :8787 (wrangler), client on :5173 (vite)
 npm run import:pdf     # seeds the 90 questions into the local D1
+npm run db:migrate     # only if your local D1 predates the difficulty column
 ```
 
 Open http://localhost:5173. To deploy, see [DEPLOY.md](DEPLOY.md).
@@ -32,7 +37,7 @@ In the lobby, the host can drop a computer player into any empty seat — pick
 human and three AI if you like.
 
 They're deliberately simple; this is a multiplayer game first. Answering is a
-difficulty dial (a per-tier chance of being right, declining as cards get harder,
+competence dial (a per-tier chance of being right, declining as cards get harder,
 so a Consultant rarely misses an easy one and still fumbles the hardest). Piece
 choice is a short priority list: reach home > capture > home column > safe square,
 ties to the piece furthest along; going backward it retreats whichever piece can
@@ -104,8 +109,7 @@ to enter play is the least fun part of Ludo and adds nothing to a question game.
 
 **A turn.**
 1. Roll. The face picks the tier and the maximum distance.
-2. Answer within the time limit (20s easy → 45s very difficult). A timeout counts
-   as wrong.
+2. Answer within **60 seconds**. A timeout counts as wrong.
 3. Correct → move a piece **forward by the roll**. Wrong → move one **back
    `floor(roll/2)`**, never past your own start. If only one piece can make the
    move, it just moves; if both can, you pick.
@@ -136,7 +140,13 @@ At **`/admin`**, behind `ADMIN_PASSWORD` (a Worker secret in production,
 there — players use `/`, admins type `/admin`. An unauthenticated visit shows a bare
 password box, and every `/api/admin/*` route returns 401 without a session.
 
-- Browse, search and filter the bank; create, edit, retire and delete questions.
+- Browse, search and filter the bank by tier, **difficulty**, state or text; create,
+  edit, retire and delete questions.
+- Every question carries a **difficulty** — Easy, Medium or Hard — set on the edit
+  form and honoured by the CSV/JSON import (`difficulty` column). It is what rooms
+  filter by, so a card nobody has classified is a card only its default audience
+  sees. The header shows how many active questions each difficulty holds; if one
+  reads 0, no room can pick it.
 - **Retiring** is the default over deleting: it keeps a question's stats and pulls
   it from future games.
 - Per-question **asked / correct-rate / timeouts**, sortable worst-first. A 0%
@@ -150,6 +160,10 @@ password box, and every `/api/admin/*` route returns 401 without a session.
 **One invariant matters more than the rest: a tier can never reach zero active
 questions.** The die face *is* the tier, so an empty tier would be a roll the game
 cannot answer. Retire, delete and import all refuse the last active card in a tier.
+
+Filtering by difficulty cuts across that: an Easy room legitimately holds no tier-6
+cards, so a draw for a tier with no stock falls back to the nearest tier that has
+some. The roll still sets the distance and the points — only the card moves.
 
 Decks are snapshotted when a game starts, so editing the bank mid-session cannot
 disturb a game already in progress.

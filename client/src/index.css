@@ -177,21 +177,81 @@ body {
   }
 }
 
+/* Two full turns per cycle with a bouncing hop, so a looping roll reads as a die
+   still travelling rather than a spinner. 720deg meets 0deg, so it repeats
+   seamlessly. */
 @keyframes tumble {
   0% {
-    transform: rotate(0) scale(1);
+    transform: translate3d(0, 0, 0) rotate(0) scale(1);
   }
-  25% {
-    transform: rotate(190deg) scale(1.18);
+  14% {
+    transform: translate3d(-9%, -34%, 0) rotate(155deg) scale(1.2);
   }
-  50% {
-    transform: rotate(370deg) scale(0.92);
+  30% {
+    transform: translate3d(4%, -4%, 0) rotate(292deg) scale(0.9);
   }
-  75% {
-    transform: rotate(560deg) scale(1.12);
+  46% {
+    transform: translate3d(10%, -38%, 0) rotate(430deg) scale(1.22);
+  }
+  62% {
+    transform: translate3d(-3%, -2%, 0) rotate(548deg) scale(0.92);
+  }
+  80% {
+    transform: translate3d(-8%, -24%, 0) rotate(640deg) scale(1.14);
   }
   100% {
-    transform: rotate(720deg) scale(1);
+    transform: translate3d(0, 0, 0) rotate(720deg) scale(1);
+  }
+}
+
+/* One bounce per square walked. The period matches STEP_MS in Board.tsx, so the
+   pawn is airborne between squares and down on each one. */
+@keyframes step-hop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  20% {
+    transform: translateY(-4%) scale(1.08, 0.92);
+  }
+  55% {
+    transform: translateY(-32%) scale(0.95, 1.08);
+  }
+  85% {
+    transform: translateY(-3%) scale(1.05, 0.95);
+  }
+}
+
+/* A score that has just gone up: swells green, then settles back to ink. */
+@keyframes score-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.45);
+    color: var(--color-emerald-600, #059669);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Hits the table, squashes wide and short, then rocks back to rest. */
+@keyframes dice-land {
+  0% {
+    transform: translate3d(0, -30%, 0) rotate(-24deg) scale(1.18);
+  }
+  38% {
+    transform: translate3d(0, 0, 0) rotate(5deg) scale(1.16, 0.82);
+  }
+  58% {
+    transform: translate3d(0, -7%, 0) rotate(-3deg) scale(0.95, 1.07);
+  }
+  78% {
+    transform: translate3d(0, 0, 0) rotate(1deg) scale(1.04, 0.97);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0) scale(1);
   }
 }
 
@@ -266,9 +326,18 @@ body {
 }
 .animate-tumble {
   /* Loops for as long as the die is rolling — a single pass left it sitting
-     still while the pips carried on flickering. 720deg meets 0deg, so it
-     repeats seamlessly. */
-  animation: tumble 700ms cubic-bezier(0.3, 1.4, 0.5, 1) infinite;
+     still while the pips carried on flickering. A short cycle is what makes it
+     look thrown: the whole roll is several fast tumbles, not one slow spin. */
+  animation: tumble 560ms cubic-bezier(0.4, 0.06, 0.55, 0.96) infinite;
+}
+.animate-dice-land {
+  animation: dice-land 420ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+.animate-step-hop {
+  animation: step-hop 190ms ease-in-out infinite;
+}
+.animate-score-pop {
+  animation: score-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .animate-throb {
   animation: throb 1.5s ease-in-out infinite;

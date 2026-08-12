@@ -14,7 +14,13 @@
 import { DEFAULT_TIMINGS, RoomEngine, type RoomTimings } from '@shared/room-engine.js'
 import { isAiId } from '@shared/ai.js'
 import { isCall, type ServerMessage } from '@shared/protocol.js'
-import type { AnswerLetter, BoardPreset, GameMode } from '@shared/types.js'
+import {
+  isDifficulty,
+  type AnswerLetter,
+  type BoardPreset,
+  type Difficulty,
+  type GameMode,
+} from '@shared/types.js'
 import { Db } from './db.js'
 
 interface Env {
@@ -28,13 +34,24 @@ interface Meta {
   code: string
   mode: GameMode
   preset: BoardPreset
+  /** Absent on rooms created before difficulty existed. */
+  difficulty?: Difficulty
   hostPlayerId: string
   hostName: string
+  /** Stamped by the Durable Object, not the caller. */
+  createdAt?: number
 }
+
+/** How long an empty room is kept alive in case everyone is just reloading. */
+const ABANDONED_GRACE_MS = 90_000
+
+/** After this, an untouched room code can be handed out again. */
+const CODE_REUSE_AFTER_MS = 6 * 60 * 60 * 1000
 
 export class RoomDurableObject implements DurableObject {
   private engine: RoomEngine | null = null
   private sockets = new Map<WebSocket, string>()
+  private teardownTimer: ReturnType<typeof setTimeout> | null = null
   private db: Db
 
   constructor(
@@ -60,12 +77,20 @@ export class RoomDurableObject implements DurableObject {
     return new Response('Not found', { status: 404 })
   }
 
-  /** Called once by the Worker when a room is created. Refuses to reuse a code. */
+  /** Called once by the Worker when a room is created. Refuses to reuse a live code. */
   private async handleInit(request: Request): Promise<Response> {
     const existing = await this.state.storage.get<Meta>('meta')
-    if (existing) return new Response('Code in use', { status: 409 })
+    // A room whose object was evicted before its teardown timer fired leaves its meta
+    // behind. Old and quiet enough, and the code is free again.
+    const stale =
+      this.sockets.size === 0 && Date.now() - (existing?.createdAt ?? 0) > CODE_REUSE_AFTER_MS
+    if (existing && !stale) return new Response('Code in use', { status: 409 })
 
-    const meta = (await request.json()) as Meta
+    if (existing) {
+      this.engine?.dispose()
+      this.engine = null
+    }
+    const meta = { ...((await request.json()) as Meta), createdAt: Date.now() }
     await this.state.storage.put('meta', meta)
     return new Response(JSON.stringify({ ok: true }), {
       headers: { 'content-type': 'application/json' },
@@ -82,6 +107,7 @@ export class RoomDurableObject implements DurableObject {
       { id: meta.hostPlayerId, name: meta.hostName },
       meta.mode,
       meta.preset,
+      isDifficulty(meta.difficulty) ? meta.difficulty : 'medium',
       {
         broadcast: (message) => this.broadcast(message),
         onStat: (questionId, outcome) => {
@@ -125,6 +151,11 @@ export class RoomDurableObject implements DurableObject {
     }
 
     this.sockets.set(server, playerId)
+    // Somebody is here after all.
+    if (this.teardownTimer) {
+      clearTimeout(this.teardownTimer)
+      this.teardownTimer = null
+    }
     void this.db.touchPlayer(playerId).catch(() => {})
 
     // Bring the newcomer up to date on their own connection.
@@ -164,7 +195,12 @@ export class RoomDurableObject implements DurableObject {
         ack = engine.setReady(playerId, Boolean(p.ready))
         break
       case 'setMode':
-        ack = engine.setMode(playerId, p.mode as GameMode, p.preset as BoardPreset)
+        ack = engine.setMode(
+          playerId,
+          p.mode as GameMode,
+          p.preset as BoardPreset,
+          isDifficulty(p.difficulty) ? p.difficulty : undefined,
+        )
         break
       case 'swapSeats':
         ack = engine.swapSeats(playerId, Number(p.a), Number(p.b))
@@ -178,7 +214,7 @@ export class RoomDurableObject implements DurableObject {
       case 'startGame': {
         const ready = engine.canStart()
         ack = ready.ok
-          ? engine.start(playerId, await this.db.activeQuestionsByTier())
+          ? engine.start(playerId, await this.db.activeQuestionsByTier(engine.difficulty))
           : ready
         break
       }
@@ -192,7 +228,7 @@ export class RoomDurableObject implements DurableObject {
         ack = engine.choose(playerId, String(p.pieceId))
         break
       case 'leaveRoom':
-        engine.markDisconnected(playerId)
+        engine.leave(playerId)
         ack = { ok: true }
         break
       default:
@@ -209,11 +245,24 @@ export class RoomDurableObject implements DurableObject {
     const stillHere = [...this.sockets.values()].includes(playerId)
     if (!stillHere) this.engine?.markDisconnected(playerId)
 
-    if (this.engine?.isAbandoned()) {
+    if (this.engine?.isAbandoned()) this.scheduleTeardown()
+  }
+
+  /**
+   * An empty room is usually an over room — but it is also what a reload looks like
+   * from here, and someone playing alone against the computers empties it every time
+   * they lock their phone. Wait a little before throwing the room away, so the code
+   * they have saved still works when they come back.
+   */
+  private scheduleTeardown() {
+    if (this.teardownTimer) return
+    this.teardownTimer = setTimeout(() => {
+      this.teardownTimer = null
+      if (this.sockets.size > 0 || !this.engine?.isAbandoned()) return
       this.engine.dispose()
       this.engine = null
       void this.state.storage.deleteAll()
-    }
+    }, ABANDONED_GRACE_MS)
   }
 
   private sendTo(socket: WebSocket, message: ServerMessage) {

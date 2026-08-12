@@ -1,11 +1,25 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { BoardPreset, GameMode, PlayerProfile } from '@shared/types.js'
+import {
+  DIFFICULTIES,
+  DIFFICULTY_EMOJI,
+  DIFFICULTY_NAMES,
+  type BoardPreset,
+  type Difficulty,
+  type GameMode,
+  type PlayerProfile,
+} from '@shared/types.js'
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
 import { Button, Logo, Panel, Screen, SoundToggle } from '../components/ui.tsx'
 
 type View = 'home' | 'create' | 'join'
+
+const DIFFICULTY_BLURBS: Record<Difficulty, string> = {
+  easy: 'Recall and basics',
+  medium: 'Applied clinical',
+  hard: 'Fine detail, tough calls',
+}
 
 /**
  * Home is two buttons and nothing else. The mode and board choices only appear
@@ -26,6 +40,7 @@ export default function Menu({
   const [view, setView] = useState<View>('home')
   const [mode, setMode] = useState<GameMode>('ffa')
   const [preset, setPreset] = useState<BoardPreset>('standard')
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +48,12 @@ export default function Menu({
   async function create() {
     setBusy(true)
     setError(null)
-    const ack = await emit<{ code: string }>('createRoom', { playerId: player.id, mode, preset })
+    const ack = await emit<{ code: string }>('createRoom', {
+      playerId: player.id,
+      mode,
+      preset,
+      difficulty,
+    })
     setBusy(false)
     if (!ack.ok) return setError(ack.error ?? 'Could not create a room')
     audio.play('join')
@@ -165,6 +185,25 @@ export default function Menu({
               detail="Long arms · ~30 min"
             />
           </div>
+
+          <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink/50">
+            Question difficulty
+          </p>
+          <div className="mb-2 grid grid-cols-3 gap-2">
+            {DIFFICULTIES.map((d) => (
+              <Choice
+                key={d}
+                active={difficulty === d}
+                onClick={() => setDifficulty(d)}
+                emoji={DIFFICULTY_EMOJI[d]}
+                title={DIFFICULTY_NAMES[d]}
+                detail={DIFFICULTY_BLURBS[d]}
+              />
+            ))}
+          </div>
+          <p className="mb-5 text-xs text-ink/50">
+            Every card in this room comes from this level. The die still decides how far you move.
+          </p>
 
           {error && <ErrorNote>{error}</ErrorNote>}
 

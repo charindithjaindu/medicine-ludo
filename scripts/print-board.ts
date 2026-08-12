@@ -28,7 +28,7 @@ import {
   type BoardConfig,
   type Cell,
 } from '../shared/src/board.js'
-import { TIER_NAMES, TIER_POINTS, TIER_TIME_LIMITS, TIERS } from '../shared/src/types.js'
+import { ANSWER_SECONDS, TIER_NAMES, TIER_POINTS, TIERS } from '../shared/src/types.js'
 import type { BoardPreset } from '../shared/src/types.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -258,7 +258,7 @@ function legend(b: BoardConfig, page: Page, top: number, cell: number): string {
       `<text x="${n(mid)}" y="${n(y + 11.2)}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
          font-size="2.9" fill="${INK}">${escape(TIER_NAMES[tier])}</text>`,
       `<text x="${n(mid)}" y="${n(y + 14.6)}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
-         font-size="2.6" fill="${INK}" fill-opacity="0.65">${TIER_POINTS[tier]} pts · ${TIER_TIME_LIMITS[tier]}s</text>`,
+         font-size="2.6" fill="${INK}" fill-opacity="0.65">${TIER_POINTS[tier]} pts · ${ANSWER_SECONDS}s</text>`,
     )
   })
 

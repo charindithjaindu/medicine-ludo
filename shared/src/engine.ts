@@ -70,6 +70,7 @@ export function createGame(opts: CreateGameOptions): GameState {
     phase: 'awaiting-roll',
     roll: null,
     question: null,
+    chosenAnswer: null,
     lastResult: null,
     choices: [],
     pendingDistance: 0,
@@ -185,12 +186,26 @@ export function applyRoll(
   const next = structuredClone(state)
   next.roll = roll
   next.question = question
+  next.chosenAnswer = null
   next.lastResult = null
   next.choices = []
   next.pendingDistance = 0
   next.phase = 'answering'
   const player = playerAt(next, seat)
   log(next, `${player?.name ?? `Seat ${seat}`} rolled a ${roll}.`)
+  return next
+}
+
+/**
+ * Lock in the active player's answer without resolving it yet.
+ *
+ * The turn pauses here for a beat so everyone at the table can see which option was
+ * chosen. Going straight from the question to "Wrong" told spectators the verdict
+ * on a choice they never saw.
+ */
+export function markAnswer(state: GameState, letter: AnswerLetter): GameState {
+  const next = structuredClone(state)
+  next.chosenAnswer = letter
   return next
 }
 

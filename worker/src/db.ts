@@ -5,6 +5,7 @@
 
 import type {
   AnswerLetter,
+  Difficulty,
   GameSummaryRow,
   LeaderboardRow,
   PlayerProfile,
@@ -12,11 +13,12 @@ import type {
   QuestionDraft,
   Tier,
 } from '@shared/types.js'
-import { TIERS } from '@shared/types.js'
+import { DIFFICULTIES, TIERS, difficultyForTier } from '@shared/types.js'
 
 interface QuestionRow {
   id: number
   tier: number
+  difficulty: string | null
   source_card: number | null
   text: string
   option_a: string
@@ -35,6 +37,10 @@ function toQuestion(row: QuestionRow): Question {
   return {
     id: row.id,
     tier: row.tier as Tier,
+    // A row written before the column existed reads as NULL; fall back to the tier.
+    difficulty: DIFFICULTIES.includes(row.difficulty as Difficulty)
+      ? (row.difficulty as Difficulty)
+      : difficultyForTier(row.tier as Tier),
     sourceCard: row.source_card,
     text: row.text,
     options: [row.option_a, row.option_b, row.option_c, row.option_d],
@@ -61,19 +67,30 @@ function toProfile(row: Record<string, unknown>): PlayerProfile {
 
 const now = () => new Date().toISOString()
 
+/**
+ * SQL mirror of `difficultyForTier`, so a row left unlabelled by an older write still
+ * groups and filters as something rather than dropping out of every query.
+ */
+const DIFFICULTY_EXPR =
+  "COALESCE(difficulty, CASE WHEN tier <= 2 THEN 'easy' WHEN tier <= 4 THEN 'medium' ELSE 'hard' END)"
+
 export class Db {
   constructor(private d1: D1Database) {}
 
   // -- questions ------------------------------------------------------------
 
   async listQuestions(
-    filter: { tier?: Tier; active?: boolean; search?: string } = {},
+    filter: { tier?: Tier; difficulty?: Difficulty; active?: boolean; search?: string } = {},
   ): Promise<Question[]> {
     const where: string[] = []
     const binds: unknown[] = []
     if (filter.tier !== undefined) {
       where.push('tier = ?')
       binds.push(filter.tier)
+    }
+    if (filter.difficulty !== undefined) {
+      where.push(`${DIFFICULTY_EXPR} = ?`)
+      binds.push(filter.difficulty)
     }
     if (filter.active !== undefined) {
       where.push('active = ?')
@@ -113,12 +130,27 @@ export class Db {
     return counts
   }
 
-  async activeQuestionsByTier(): Promise<Record<Tier, Question[]>> {
+  async activeCountByDifficulty(): Promise<Record<Difficulty, number>> {
+    const counts = Object.fromEntries(DIFFICULTIES.map((d) => [d, 0])) as Record<Difficulty, number>
+    const { results } = await this.d1
+      .prepare(
+        `SELECT ${DIFFICULTY_EXPR} AS difficulty, COUNT(*) AS n
+         FROM questions WHERE active = 1 GROUP BY 1`,
+      )
+      .all<{ difficulty: string; n: number }>()
+    for (const r of results) {
+      if (DIFFICULTIES.includes(r.difficulty as Difficulty)) counts[r.difficulty as Difficulty] = r.n
+    }
+    return counts
+  }
+
+  /** The decks a room starts with: active questions of its difficulty, split by tier. */
+  async activeQuestionsByTier(difficulty?: Difficulty): Promise<Record<Tier, Question[]>> {
     const byTier = Object.fromEntries(TIERS.map((t) => [t, [] as Question[]])) as Record<
       Tier,
       Question[]
     >
-    for (const q of await this.listQuestions({ active: true })) byTier[q.tier].push(q)
+    for (const q of await this.listQuestions({ active: true, difficulty })) byTier[q.tier].push(q)
     return byTier
   }
 
@@ -127,11 +159,12 @@ export class Db {
     const result = await this.d1
       .prepare(
         `INSERT INTO questions
-           (tier, source_card, text, option_a, option_b, option_c, option_d, answer, explanation, active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+           (tier, difficulty, source_card, text, option_a, option_b, option_c, option_d, answer, explanation, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
       .bind(
         draft.tier,
+        draft.difficulty ?? difficultyForTier(draft.tier),
         draft.sourceCard ?? null,
         draft.text,
         draft.options[0],
@@ -153,6 +186,7 @@ export class Db {
     if (!existing) return null
     const merged = {
       tier: patch.tier ?? existing.tier,
+      difficulty: patch.difficulty ?? existing.difficulty,
       text: patch.text ?? existing.text,
       options: patch.options ?? existing.options,
       answer: patch.answer ?? existing.answer,
@@ -161,11 +195,12 @@ export class Db {
     }
     await this.d1
       .prepare(
-        `UPDATE questions SET tier=?, text=?, option_a=?, option_b=?, option_c=?, option_d=?,
+        `UPDATE questions SET tier=?, difficulty=?, text=?, option_a=?, option_b=?, option_c=?, option_d=?,
          answer=?, explanation=?, active=?, updated_at=? WHERE id=?`,
       )
       .bind(
         merged.tier,
+        merged.difficulty,
         merged.text,
         merged.options[0],
         merged.options[1],

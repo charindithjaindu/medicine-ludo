@@ -15,8 +15,10 @@
 import {
   AI_ID_PREFIX,
   AI_NAMES,
+  choiceDelayMs,
   chooseAnswer,
   choosePiece as aiChoosePiece,
+  rollDelayMs,
   thinkTimeMs,
   type AiSkill,
 } from './ai.js'
@@ -25,6 +27,7 @@ import {
   choosePiece,
   createGame,
   endTurn,
+  markAnswer,
   resolveAnswer,
   rollDie,
   summarise,
@@ -32,10 +35,13 @@ import {
 } from './engine.js'
 import type { ServerMessage } from './protocol.js'
 import {
-  TIER_TIME_LIMITS,
+  ANSWER_SECONDS,
+  DIFFICULTY_NAMES,
+  TIERS,
   type Ack,
   type AnswerLetter,
   type BoardPreset,
+  type Difficulty,
   type GameMode,
   type GameState,
   type GameSummaryRow,
@@ -51,6 +57,10 @@ export interface RoomTimings {
   rollTimeoutMs: number
   choiceTimeoutMs: number
   disconnectedTimeoutMs: number
+  /** How long a dropped socket keeps its lobby seat before the seat is given up. */
+  lobbyGraceMs: number
+  /** How long the chosen answer sits on screen before the verdict. */
+  answerLockMs: number
   aiDelayScale: number
 }
 
@@ -60,6 +70,8 @@ export const DEFAULT_TIMINGS: RoomTimings = {
   rollTimeoutMs: 45000,
   choiceTimeoutMs: 20000,
   disconnectedTimeoutMs: 3000,
+  lobbyGraceMs: 15000,
+  answerLockMs: 1000,
   aiDelayScale: 1,
 }
 
@@ -93,34 +105,41 @@ function shuffle<T>(items: T[]): T[] {
   return out
 }
 
-/** Six decks, drawn without replacement, snapshotted when the game starts. */
+/**
+ * Six decks, drawn without replacement, snapshotted when the game starts.
+ *
+ * Filtering a room to one difficulty routinely leaves a tier empty — an Easy room
+ * holds no Very Difficult cards — so a draw falls back to the nearest tier that does
+ * have stock. The roll still sets the move and the points; only the card changes.
+ */
 class Deck {
   private remaining: Record<Tier, Question[]>
+
   constructor(private source: Record<Tier, Question[]>) {
     this.remaining = Object.fromEntries(
-      Object.entries(source).map(([tier, list]) => [tier, shuffle(list)]),
+      TIERS.map((tier) => [tier, shuffle(source[tier] ?? [])]),
     ) as Record<Tier, Question[]>
   }
 
   hasAny(): boolean {
-    return Object.values(this.source).some((list) => list.length > 0)
+    return TIERS.some((tier) => (this.source[tier]?.length ?? 0) > 0)
   }
 
   draw(tier: Tier): Question | null {
-    if (this.remaining[tier]?.length) return this.remaining[tier].pop()!
-    if (this.source[tier]?.length) {
-      this.remaining[tier] = shuffle(this.source[tier])
-      return this.remaining[tier].pop()!
+    const from = this.nearestStocked(tier)
+    if (from === null) return null
+    if (!this.remaining[from].length) this.remaining[from] = shuffle(this.source[from])
+    return this.remaining[from].pop() ?? null
+  }
+
+  /** The tier asked for if it holds anything at all, otherwise the closest that does. */
+  private nearestStocked(tier: Tier): Tier | null {
+    let best: Tier | null = null
+    for (const candidate of TIERS) {
+      if (!this.source[candidate]?.length) continue
+      if (best === null || Math.abs(candidate - tier) < Math.abs(best - tier)) best = candidate
     }
-    // A tier should never be empty, but never hang the game over it.
-    for (const list of Object.values(this.remaining)) if (list.length) return list.pop()!
-    for (const [tier2, list] of Object.entries(this.source)) {
-      if (list.length) {
-        this.remaining[Number(tier2) as Tier] = shuffle(list)
-        return this.remaining[Number(tier2) as Tier].pop()!
-      }
-    }
-    return null
+    return best
   }
 }
 
@@ -129,12 +148,14 @@ export class RoomEngine {
   hostPlayerId: string
   mode: GameMode
   preset: BoardPreset
+  difficulty: Difficulty
   private seats: SeatEntry[] = []
   game: GameState | null = null
   private deck: Deck | null = null
   private pendingQuestion: Question | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private aiTimer: ReturnType<typeof setTimeout> | null = null
+  private lobbyTimer: ReturnType<typeof setTimeout> | null = null
   private aiKey = ''
 
   constructor(
@@ -142,6 +163,7 @@ export class RoomEngine {
     host: Profile,
     mode: GameMode,
     preset: BoardPreset,
+    difficulty: Difficulty,
     private hooks: RoomHooks,
     private timings: RoomTimings = DEFAULT_TIMINGS,
   ) {
@@ -149,6 +171,7 @@ export class RoomEngine {
     this.hostPlayerId = host.id
     this.mode = mode
     this.preset = preset
+    this.difficulty = difficulty
     this.seats.push({
       playerId: host.id,
       name: host.name || 'Player',
@@ -195,11 +218,12 @@ export class RoomEngine {
     return { ok: true }
   }
 
-  setMode(playerId: string, mode: GameMode, preset: BoardPreset): Ack {
+  setMode(playerId: string, mode: GameMode, preset: BoardPreset, difficulty?: Difficulty): Ack {
     const guard = this.hostGuard(playerId)
     if (guard) return guard
     this.mode = mode
     this.preset = preset
+    if (difficulty) this.difficulty = difficulty
     this.emitRoom()
     return { ok: true }
   }
@@ -262,7 +286,12 @@ export class RoomEngine {
 
     const deck = new Deck(questionsByTier)
     if (!deck.hasAny()) {
-      return { ok: false, error: 'There are no active questions. Ask an admin to add some.' }
+      return {
+        ok: false,
+        error:
+          `There are no active ${DIFFICULTY_NAMES[this.difficulty]} questions. ` +
+          'Pick another difficulty, or ask an admin to add some.',
+      }
     }
 
     this.deck = deck
@@ -290,17 +319,19 @@ export class RoomEngine {
   // Connection state
   // -------------------------------------------------------------------------
 
+  /**
+   * The socket went away. Not necessarily the player: a reload, a locked phone or a
+   * tunnel all look like this, and a mid-game seat is held for good. In the lobby the
+   * seat is held for a few seconds too, so coming straight back puts you in the same
+   * chair — still the host, if you were.
+   */
   markDisconnected(playerId: string) {
     const seat = this.seats.find((s) => s.playerId === playerId)
     if (!seat) return
     seat.connected = false
 
     if (!this.game) {
-      this.seats = this.seats.filter((s) => s.playerId !== playerId)
-      const humans = this.seats.filter((s) => !s.ai)
-      if (humans.length > 0 && this.hostPlayerId === playerId) {
-        this.hostPlayerId = humans[0].playerId
-      }
+      this.armLobbyPrune()
     } else {
       this.syncConnectionFlags()
       this.emitGame()
@@ -311,6 +342,39 @@ export class RoomEngine {
     this.emitRoom()
   }
 
+  /** They tapped Leave. No grace — they meant it. */
+  leave(playerId: string) {
+    const seat = this.seats.find((s) => s.playerId === playerId)
+    if (!seat) return
+    seat.connected = false
+    if (this.game) {
+      this.markDisconnected(playerId)
+      return
+    }
+    this.seats = this.seats.filter((s) => s.playerId !== playerId)
+    this.reassignHost()
+    this.emitRoom()
+  }
+
+  private armLobbyPrune() {
+    if (this.lobbyTimer) return
+    this.lobbyTimer = setTimeout(() => {
+      this.lobbyTimer = null
+      if (this.game) return
+      const before = this.seats.length
+      this.seats = this.seats.filter((s) => s.ai || s.connected)
+      if (this.seats.length === before) return
+      this.reassignHost()
+      this.emitRoom()
+    }, this.timings.lobbyGraceMs)
+  }
+
+  private reassignHost() {
+    if (this.seats.some((s) => s.playerId === this.hostPlayerId)) return
+    const humans = this.seats.filter((s) => !s.ai)
+    if (humans.length > 0) this.hostPlayerId = humans[0].playerId
+  }
+
   /** True once nobody human is connected, so the host can drop the room. */
   isAbandoned(): boolean {
     return !this.seats.some((s) => !s.ai && s.connected)
@@ -319,6 +383,8 @@ export class RoomEngine {
   dispose() {
     this.clearTimer()
     this.clearAiTimer()
+    if (this.lobbyTimer) clearTimeout(this.lobbyTimer)
+    this.lobbyTimer = null
   }
 
   // -------------------------------------------------------------------------
@@ -339,6 +405,8 @@ export class RoomEngine {
     if (!this.game) return { ok: false, error: 'No game in progress' }
     if (this.game.phase !== 'answering') return { ok: false, error: 'Not time to answer' }
     if (seat !== this.game.turnSeat) return { ok: false, error: 'Not your question' }
+    // Locked in already: the answer is sitting on screen waiting to resolve.
+    if (this.game.chosenAnswer !== null) return { ok: false, error: 'You have already answered' }
     this.performAnswer(letter)
     return { ok: true }
   }
@@ -369,7 +437,7 @@ export class RoomEngine {
     }
 
     this.pendingQuestion = question
-    const deadline = Date.now() + TIER_TIME_LIMITS[question.tier] * 1000
+    const deadline = Date.now() + ANSWER_SECONDS * 1000
     this.game = applyRoll(game, game.turnSeat, roll, {
       id: question.id,
       tier: question.tier,
@@ -389,7 +457,27 @@ export class RoomEngine {
     this.timer = setTimeout(() => this.performAnswer(null), waitMs)
   }
 
+  /**
+   * Two beats, not one. First the chosen option is locked in and shown to the whole
+   * table; a second later it resolves. Jumping straight to the verdict meant the
+   * other players were told an answer was wrong without ever seeing which answer it
+   * was. A timeout skips the pause — there is no choice to look at.
+   */
   private performAnswer(letter: AnswerLetter | null) {
+    this.clearTimer()
+    const game = this.game
+    if (!game || !this.pendingQuestion) return
+
+    if (letter !== null && game.phase === 'answering' && game.chosenAnswer === null) {
+      this.game = markAnswer(game, letter)
+      this.emitGame()
+      this.timer = setTimeout(() => this.resolveAnswerNow(letter), this.timings.answerLockMs)
+      return
+    }
+    this.resolveAnswerNow(letter)
+  }
+
+  private resolveAnswerNow(letter: AnswerLetter | null) {
     this.clearTimer()
     const game = this.game
     const question = this.pendingQuestion
@@ -502,14 +590,17 @@ export class RoomEngine {
     }
 
     if (game.phase === 'awaiting-roll') {
-      run(() => this.performRoll(), 1100)
-    } else if (game.phase === 'answering' && this.pendingQuestion) {
+      run(() => this.performRoll(), rollDelayMs())
+    } else if (game.phase === 'answering' && this.pendingQuestion && game.chosenAnswer === null) {
+      // The `chosenAnswer` guard matters: locking an answer re-broadcasts the game
+      // still in 'answering', and without it a computer would queue a second answer
+      // during the pause before its first one resolves.
       const q = this.pendingQuestion
       const letter = chooseAnswer(seat.ai, q.tier, q.answer)
       run(() => this.performAnswer(letter), thinkTimeMs(q.tier))
     } else if (game.phase === 'choosing-piece' && game.choices.length > 0) {
       const pick = aiChoosePiece(game, game.turnSeat, game.pendingDistance, game.choices)
-      run(() => this.performChoice(pick), 850)
+      run(() => this.performChoice(pick), choiceDelayMs())
     }
   }
 
@@ -541,6 +632,7 @@ export class RoomEngine {
       hostPlayerId: this.hostPlayerId,
       mode: this.mode,
       preset: this.preset,
+      difficulty: this.difficulty,
       started: this.game !== null,
       seats: this.seats.map((s, seat) => ({
         seat,

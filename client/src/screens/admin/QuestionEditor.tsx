@@ -1,5 +1,17 @@
 import { useState } from 'react'
-import { ANSWER_LETTERS, TIER_NAMES, TIERS, type AnswerLetter, type Question, type Tier } from '@shared/types.js'
+import {
+  ANSWER_LETTERS,
+  DIFFICULTIES,
+  DIFFICULTY_EMOJI,
+  DIFFICULTY_NAMES,
+  TIER_NAMES,
+  TIERS,
+  difficultyForTier,
+  type AnswerLetter,
+  type Difficulty,
+  type Question,
+  type Tier,
+} from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
 
 export default function QuestionEditor({
@@ -12,6 +24,9 @@ export default function QuestionEditor({
   onSaved: () => void
 }) {
   const [tier, setTier] = useState<Tier>(question?.tier ?? 1)
+  const [difficulty, setDifficulty] = useState<Difficulty>(
+    question?.difficulty ?? difficultyForTier(question?.tier ?? 1),
+  )
   const [text, setText] = useState(question?.text ?? '')
   const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', ''])
   const [answer, setAnswer] = useState<AnswerLetter>(question?.answer ?? 'A')
@@ -24,7 +39,15 @@ export default function QuestionEditor({
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const body = { tier, text, options, answer, explanation: explanation || null, active }
+    const body = {
+      tier,
+      difficulty,
+      text,
+      options,
+      answer,
+      explanation: explanation || null,
+      active,
+    }
     try {
       if (question) await adminApi.update(question.id, body)
       else await adminApi.create(body)
@@ -101,6 +124,31 @@ export default function QuestionEditor({
                   <span className={tier === t ? 'text-slate-300' : 'text-slate-500'}>
                     {TIER_NAMES[t]}
                   </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700">
+              Difficulty{' '}
+              <span className="text-slate-400">
+                — rooms are filtered by this, so it decides who ever sees this card
+              </span>
+            </label>
+            <div className="mt-1 grid grid-cols-3 gap-1.5">
+              {DIFFICULTIES.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDifficulty(d)}
+                  className={`rounded-lg px-2 py-1.5 text-sm ring-1 transition ${
+                    difficulty === d
+                      ? 'bg-slate-900 text-white ring-slate-900'
+                      : 'bg-white ring-slate-200 hover:ring-slate-400'
+                  }`}
+                >
+                  {DIFFICULTY_EMOJI[d]} {DIFFICULTY_NAMES[d]}
                 </button>
               ))}
             </div>

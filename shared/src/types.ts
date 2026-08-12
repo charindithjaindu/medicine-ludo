@@ -26,14 +26,51 @@ export const TIER_NAMES: Record<Tier, string> = {
   6: 'Very Difficult',
 }
 
-/** Seconds a player gets to answer, by tier. Harder cards get more thinking time. */
-export const TIER_TIME_LIMITS: Record<Tier, number> = {
-  1: 20,
-  2: 25,
-  3: 30,
-  4: 30,
-  5: 40,
-  6: 45,
+/**
+ * Seconds a player gets to answer, whatever the card.
+ *
+ * It used to scale with the tier, from 20s up to 45s, and the table could not keep
+ * up — reading a clinical stem, weighing four options and tapping one is a minute's
+ * work, so everyone gets a minute.
+ */
+export const ANSWER_SECONDS = 60
+
+/**
+ * How hard a question is, independent of its tier.
+ *
+ * The tier is a die face — it decides how far you move and how many points the card
+ * is worth. The difficulty is about the medicine, and it is what a room is filtered
+ * by: an Easy room only ever draws Easy questions.
+ */
+export type Difficulty = 'easy' | 'medium' | 'hard'
+
+export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
+
+export const DIFFICULTY_NAMES: Record<Difficulty, string> = {
+  easy: 'Easy',
+  medium: 'Medium',
+  hard: 'Hard',
+}
+
+export const DIFFICULTY_EMOJI: Record<Difficulty, string> = {
+  easy: '🌱',
+  medium: '⚖️',
+  hard: '🔥',
+}
+
+/**
+ * The label a question gets when nobody has classified it yet. The seeded deck is
+ * already ordered by tier — EASY through VERY DIFFICULT — so its own ordering is the
+ * best guess available.
+ */
+export function difficultyForTier(tier: Tier): Difficulty {
+  if (tier <= 2) return 'easy'
+  if (tier <= 4) return 'medium'
+  return 'hard'
+}
+
+export function isDifficulty(value: unknown): value is Difficulty {
+  return typeof value === 'string' && DIFFICULTIES.includes(value as Difficulty)
 }
 
 /** Leaderboard points for a correct answer, by tier. */
@@ -56,6 +93,7 @@ export const ANSWER_LETTERS: AnswerLetter[] = ['A', 'B', 'C', 'D']
 export interface Question {
   id: number
   tier: Tier
+  difficulty: Difficulty
   /** 1-90 for cards seeded from the PDF, null for admin-authored questions. */
   sourceCard: number | null
   text: string
@@ -81,6 +119,7 @@ export interface QuestionForPlay {
 /** Draft shape used by the admin form and the bulk importer alike. */
 export interface QuestionDraft {
   tier: Tier
+  difficulty: Difficulty
   text: string
   options: [string, string, string, string]
   answer: AnswerLetter
@@ -190,6 +229,12 @@ export interface GameState {
   phase: TurnPhase
   roll: number | null
   question: QuestionForPlay | null
+  /**
+   * The answer the active player has locked in, held here for a moment before it
+   * resolves. It exists so the rest of the table sees *what* was picked before they
+   * are told whether it was right.
+   */
+  chosenAnswer: AnswerLetter | null
   /** Set once an answer resolves, cleared on the next roll. */
   lastResult: TurnResult | null
   /** Pieces the active player may pick between, when phase is 'choosing-piece'. */
@@ -222,6 +267,8 @@ export interface RoomView {
   hostPlayerId: string
   mode: GameMode
   preset: BoardPreset
+  /** Every card drawn in this room carries this label. */
+  difficulty: Difficulty
   seats: Seat[]
   started: boolean
 }
@@ -238,13 +285,16 @@ export interface Ack<T = undefined> {
 
 export interface ClientToServerEvents {
   createRoom: (
-    p: { playerId: string; mode: GameMode; preset: BoardPreset },
+    p: { playerId: string; mode: GameMode; preset: BoardPreset; difficulty: Difficulty },
     ack: (r: Ack<{ code: string }>) => void,
   ) => void
   joinRoom: (p: { playerId: string; code: string }, ack: (r: Ack<{ code: string }>) => void) => void
   leaveRoom: (ack: (r: Ack) => void) => void
   setReady: (p: { ready: boolean }, ack: (r: Ack) => void) => void
-  setMode: (p: { mode: GameMode; preset: BoardPreset }, ack: (r: Ack) => void) => void
+  setMode: (
+    p: { mode: GameMode; preset: BoardPreset; difficulty?: Difficulty },
+    ack: (r: Ack) => void,
+  ) => void
   swapSeats: (p: { a: number; b: number }, ack: (r: Ack) => void) => void
   addAi: (p: { skill: import('./ai.js').AiSkill }, ack: (r: Ack) => void) => void
   removeSeat: (p: { seat: number }, ack: (r: Ack) => void) => void

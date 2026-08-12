@@ -1,4 +1,13 @@
-import { ANSWER_LETTERS, TIERS, type AnswerLetter, type QuestionDraft, type Tier } from './types.js'
+import {
+  ANSWER_LETTERS,
+  DIFFICULTIES,
+  TIERS,
+  difficultyForTier,
+  type AnswerLetter,
+  type Difficulty,
+  type QuestionDraft,
+  type Tier,
+} from './types.js'
 
 export interface ValidationResult {
   ok: boolean
@@ -33,6 +42,12 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
     errors.push('Answer must be A, B, C or D.')
   }
 
+  const difficultyRaw = raw.difficulty
+  const difficulty = parseDifficulty(difficultyRaw)
+  if (difficultyRaw !== undefined && difficultyRaw !== null && difficultyRaw !== '' && !difficulty) {
+    errors.push(`Difficulty must be one of ${DIFFICULTIES.join(', ')}.`)
+  }
+
   if (errors.length > 0) return { ok: false, errors }
 
   const explanationRaw = raw.explanation
@@ -50,6 +65,9 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
     errors: [],
     draft: {
       tier: tier as Tier,
+      // An unlabelled question is not an error: the tier ordering is a good enough
+      // first guess, and an admin can correct it later.
+      difficulty: difficulty ?? difficultyForTier(tier as Tier),
       text,
       options: options as [string, string, string, string],
       answer: answer as AnswerLetter,
@@ -58,6 +76,19 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
       sourceCard: Number.isFinite(sourceCard) ? sourceCard : null,
     },
   }
+}
+
+/**
+ * Lenient on purpose: a spreadsheet exported by hand is as likely to say "Difficult"
+ * or "MED" as it is to say "hard".
+ */
+export function parseDifficulty(value: unknown): Difficulty | null {
+  if (typeof value !== 'string') return null
+  const s = value.trim().toLowerCase()
+  if (['easy', 'simple', 'basic', 'e'].includes(s)) return 'easy'
+  if (['medium', 'mid', 'med', 'moderate', 'm'].includes(s)) return 'medium'
+  if (['hard', 'difficult', 'very difficult', 'advanced', 'h', 'd'].includes(s)) return 'hard'
+  return null
 }
 
 export function parseBoolean(value: unknown, fallback: boolean): boolean {

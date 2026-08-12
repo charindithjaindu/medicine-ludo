@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ANSWER_LETTERS,
+  ANSWER_SECONDS,
+  DIFFICULTY_EMOJI,
+  DIFFICULTY_NAMES,
   TIER_NAMES,
   TIER_POINTS,
-  TIER_TIME_LIMITS,
   type AnswerLetter,
+  type Difficulty,
   type GameState,
   type GameSummaryRow,
   type PlayerProfile,
   type RoomView,
+  type Tier,
   type Winner,
 } from '@shared/types.js'
 import { boardConfig, SEAT_COLORS, TEAM_NAMES } from '@shared/board.js'
@@ -19,6 +23,48 @@ import Confetti from '../components/Confetti.tsx'
 import { Backdrop, Button, Loader, Panel, Sheet, SoundToggle } from '../components/ui.tsx'
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
+
+/**
+ * How long the die tumbles before its question appears.
+ *
+ * The old 700ms was over before anyone had looked at it — and on a phone the
+ * question sheet covered the die almost immediately, so the throw was never really
+ * seen. Holding the question back costs a second and a half of a sixty-second
+ * clock, which is worth it for a roll that looks thrown rather than computed.
+ */
+const DICE_ROLL_MS = 1500
+
+/**
+ * True while a freshly-landed roll is still in the air — for everyone at the
+ * table, not just whoever threw it, so the whole room watches the same die.
+ */
+function useRollAnimation(game: GameState): boolean {
+  const [animating, setAnimating] = useState(false)
+  const seen = useRef('')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // A string, so this effect is driven by *which* roll rather than by every
+  // re-broadcast of the same game state.
+  const rollId =
+    game.phase === 'answering' && game.question ? `${game.turnSeat}:${game.question.id}` : ''
+
+  useEffect(() => {
+    if (!rollId) {
+      seen.current = ''
+      setAnimating(false)
+      return
+    }
+    if (seen.current === rollId) return
+    seen.current = rollId
+    setAnimating(true)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setAnimating(false), DICE_ROLL_MS)
+  }, [rollId])
+
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), [])
+
+  return animating
+}
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-emerald-300',
@@ -48,6 +94,7 @@ export default function Game({
   const b = boardConfig(game.preset)
 
   const { burst, shower, flash } = useGameFeedback(game, over)
+  const throwing = useRollAnimation(game)
 
   return (
     <div className="relative min-h-full">
@@ -112,19 +159,39 @@ export default function Game({
           {/* On a phone the turn controls move to a fixed bar at the bottom, where a
               thumb can reach them and where they cost no vertical space. */}
           <div className="hidden space-y-3 lg:block">
-            <TurnPanel game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+            <TurnPanel
+              game={game}
+              myTurn={myTurn}
+              activeName={active?.name ?? ''}
+              throwing={throwing}
+            />
             <LogPanel game={game} />
           </div>
         </div>
       </div>
 
-      <MobileTurnBar game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+      <MobileTurnBar
+        game={game}
+        myTurn={myTurn}
+        activeName={active?.name ?? ''}
+        throwing={throwing}
+      />
 
       {/* The question pops up over everything: on a phone the board would otherwise
-          push it below the fold, and the clock is running. */}
+          push it below the fold, and the clock is running. The die gets the sheet to
+          itself first — it is the same beat, so it belongs in the same place. */}
       {game.phase === 'answering' && game.question && (
         <Sheet>
-          <QuestionPanel game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+          {throwing ? (
+            <ThrowPanel game={game} myTurn={myTurn} activeName={active?.name ?? ''} />
+          ) : (
+            <QuestionPanel
+              game={game}
+              difficulty={room.difficulty}
+              myTurn={myTurn}
+              activeName={active?.name ?? ''}
+            />
+          )}
         </Sheet>
       )}
 
@@ -169,14 +236,20 @@ function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
   }, [game.phase, game.question, game.turnSeat])
 
   /**
-   * The celebration belongs to the *answer*, so it is keyed on the answer alone.
-   * Keying it on the whole result meant a second, identical celebration once the
-   * player picked a piece: the same result arrives again with movedPieceId filled
-   * in, which looked like a fresh event.
+   * The celebration belongs to the *answer*, so it is keyed on the answer alone —
+   * keying it on the whole result fired a second, identical celebration once the
+   * player picked a piece.
+   *
+   * It also waits for the reveal. When a turn needs a piece chosen, the verdict
+   * arrives one broadcast early, alongside `choosing-piece`: celebrating there and
+   * then opening a reveal sheet that says "Correct!" again announced the same thing
+   * twice, side by side with the move the player had just made. The direction in
+   * "move forward 4" already tells them how they did; the fanfare belongs with the
+   * sheet that explains it.
    */
   useEffect(() => {
     const r = game.lastResult
-    if (!r) return
+    if (!r || game.phase !== 'revealing') return
     const answered = answerBeat(r)
     if (seenAnswer.current === answered) return
     seenAnswer.current = answered
@@ -191,7 +264,7 @@ function useGameFeedback(game: GameState, over: { winner: Winner } | null) {
     }
     const clear = setTimeout(() => setFlash(null), 620)
     return () => clearTimeout(clear)
-  }, [game.lastResult])
+  }, [game.lastResult, game.phase])
 
   /** What the move earned is a separate beat, and only lands once a piece has moved. */
   useEffect(() => {
@@ -266,7 +339,14 @@ function PlayerStrip({
                   {game.mode === 'teams' && ` · ${TEAM_NAMES[p.team]} ${teamHome(p.team)}/2`}
                 </p>
               </div>
-              <span className="shrink-0 text-lg font-bold tabular-nums">{p.score}</span>
+              {/* Keyed on the score so React remounts it and the pop replays: a
+                  number that quietly changes is a number nobody notices. */}
+              <span
+                key={p.score}
+                className="shrink-0 animate-score-pop text-lg font-bold tabular-nums"
+              >
+                {p.score}
+              </span>
             </div>
 
             <div className="mt-2 flex gap-1">
@@ -310,29 +390,38 @@ function useCountdown(deadline: number | null): number {
   return left
 }
 
+/**
+ * The gap between tapping Roll and the server's answer coming back. Tumbling
+ * through it means the die never waits on the network in a dead pose.
+ */
+function useThrow(game: GameState, throwing: boolean) {
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    if (game.phase !== 'awaiting-roll') setPending(false)
+  }, [game.phase])
+
+  async function roll() {
+    setPending(true)
+    const ack = await emit('roll')
+    if (!ack.ok) setPending(false)
+  }
+
+  return { rolling: pending || throwing, roll }
+}
+
 function TurnPanel({
   game,
   myTurn,
   activeName,
+  throwing,
 }: {
   game: GameState
   myTurn: boolean
   activeName: string
+  throwing: boolean
 }) {
-  const [rolling, setRolling] = useState(false)
-
-  // Tumble the die briefly whenever a new roll lands, for everyone watching.
-  useEffect(() => {
-    if (game.phase !== 'answering') return
-    setRolling(true)
-    const t = setTimeout(() => setRolling(false), 700)
-    return () => clearTimeout(t)
-  }, [game.phase, game.question?.id])
-
-  async function roll() {
-    setRolling(true)
-    await emit('roll')
-  }
+  const { rolling, roll } = useThrow(game, throwing)
 
   if (game.phase === 'awaiting-roll') {
     return (
@@ -342,7 +431,7 @@ function TurnPanel({
             <Dice value={null} rolling={rolling} size={110} className="mx-auto" />
             <p className="mt-4 text-xl font-semibold">Your turn!</p>
             <p className="mt-1 text-sm text-ink/60">
-              The number you roll is the difficulty. A 6 offers six squares — and the hardest card.
+              The number you roll is what's at stake. A 6 offers six squares — and 60 points.
             </p>
             <Button variant="primary" size="xl" className="mt-4 w-full" onClick={roll} sound={null}>
               🎲 Roll the die
@@ -431,18 +520,14 @@ function MobileTurnBar({
   game,
   myTurn,
   activeName,
+  throwing,
 }: {
   game: GameState
   myTurn: boolean
   activeName: string
+  throwing: boolean
 }) {
-  const [rolling, setRolling] = useState(false)
-
-  async function roll() {
-    setRolling(true)
-    await emit('roll')
-    setTimeout(() => setRolling(false), 700)
-  }
+  const { rolling, roll } = useThrow(game, throwing)
 
   let content: React.ReactNode
   if (game.phase === 'awaiting-roll' && myTurn) {
@@ -481,7 +566,12 @@ function MobileTurnBar({
   )
 }
 
-function QuestionPanel({
+/**
+ * The sheet while the die is still in the air. It shows nothing about the roll —
+ * the value is already known to the client, and revealing it early would give the
+ * tumble away.
+ */
+function ThrowPanel({
   game,
   myTurn,
   activeName,
@@ -490,11 +580,38 @@ function QuestionPanel({
   myTurn: boolean
   activeName: string
 }) {
+  return (
+    <div className="grid place-items-center px-4 py-10 text-center">
+      <Dice value={game.roll} rolling size={112} />
+      <p className="mt-6 text-xl font-semibold">
+        {myTurn ? 'Rolling…' : `${activeName} is rolling…`}
+      </p>
+    </div>
+  )
+}
+
+function QuestionPanel({
+  game,
+  difficulty,
+  myTurn,
+  activeName,
+}: {
+  game: GameState
+  difficulty: Difficulty
+  myTurn: boolean
+  activeName: string
+}) {
   const q = game.question!
+  // The die face, not the card's own tier: it is what the move and the points are
+  // worth, and in a difficulty-filtered room the card may come from another tier.
+  const tier = (game.roll ?? q.tier) as Tier
   const left = useCountdown(q.deadline)
+  // Local state so the tap responds instantly; the server's `chosenAnswer` is what
+  // everyone *else* at the table sees, and it is the one that locks the buttons.
   const [sent, setSent] = useState<AnswerLetter | null>(null)
+  const locked = game.chosenAnswer ?? sent
   const seconds = Math.ceil(left / 1000)
-  const totalMs = TIER_TIME_LIMITS[q.tier] * 1000
+  const totalMs = ANSWER_SECONDS * 1000
   const urgent = seconds <= 5 && seconds > 0
 
   useEffect(() => setSent(null), [q.id])
@@ -502,26 +619,33 @@ function QuestionPanel({
   // A rising tick in the last five seconds. Only for the person on the clock.
   const lastTick = useRef(0)
   useEffect(() => {
-    if (!myTurn || !urgent || sent) return
+    if (!myTurn || !urgent || locked) return
     if (lastTick.current === seconds) return
     lastTick.current = seconds
     audio.play('tick')
-  }, [seconds, urgent, myTurn, sent])
+  }, [seconds, urgent, myTurn, locked])
 
   return (
-    <div className={`p-4 ${urgent && myTurn && !sent ? 'animate-throb' : ''}`}>
+    <div className={`p-4 ${urgent && myTurn && !locked ? 'animate-throb' : ''}`}>
       <div className="flex items-center gap-3">
-        <Dice value={game.roll} size={56} />
+        {/* The sheet has just swapped out the tumbling die, so this one picks the
+            throw up where it left off and takes the impact. */}
+        <Dice value={game.roll} land size={56} />
         <div className="min-w-0 flex-1">
           <span
             className={`inline-block rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-bold ${
-              TIER_COLORS[q.tier]
+              TIER_COLORS[tier]
             }`}
           >
-            {TIER_NAMES[q.tier]}
+            {TIER_NAMES[tier]}
           </span>
           <p className="mt-0.5 text-xs font-medium text-ink/60">
-            {TIER_POINTS[q.tier]} pts · move {game.roll}
+            {TIER_POINTS[tier]} pts · move {game.roll} ·{' '}
+            {/* "deck", because the tier badge above is also named Easy…Very Difficult
+                and the two mean different things. */}
+            <span title="Every card in this room comes from this level">
+              {DIFFICULTY_EMOJI[difficulty]} {DIFFICULTY_NAMES[difficulty]} deck
+            </span>
           </p>
         </div>
         <span
@@ -545,11 +669,11 @@ function QuestionPanel({
       <div className="mt-3 space-y-2">
         {q.options.map((opt, i) => {
           const letter = ANSWER_LETTERS[i]
-          const chosen = sent === letter
+          const chosen = locked === letter
           return (
             <button
               key={letter}
-              disabled={!myTurn || sent !== null}
+              disabled={!myTurn || locked !== null}
               onClick={() => {
                 audio.play('click')
                 setSent(letter)
@@ -557,10 +681,12 @@ function QuestionPanel({
               }}
               className={`flex w-full items-start gap-2.5 rounded-xl border-[3px] border-ink px-3 py-2.5 text-left font-medium transition ${
                 chosen
-                  ? 'bg-amber-300 shadow-[3px_3px_0_0_var(--color-ink)]'
-                  : myTurn
+                  ? 'animate-score-pop bg-amber-300 shadow-[3px_3px_0_0_var(--color-ink)]'
+                  : locked
+                    ? 'bg-white/60 text-ink/45'
+                    : myTurn
                     ? 'bg-white hover:-translate-y-0.5 hover:bg-amber-50 hover:shadow-[3px_3px_0_0_var(--color-ink)]'
-                    : 'bg-white/70 text-ink/60'
+                      : 'bg-white/70 text-ink/60'
               }`}
             >
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 border-ink bg-cream font-mono text-sm font-bold">
@@ -572,13 +698,16 @@ function QuestionPanel({
         })}
       </div>
 
-      {!myTurn && (
+      {locked ? (
         <p className="mt-3 text-center text-sm font-medium text-ink/60">
-          {activeName} is answering…
+          {myTurn ? 'Locked in 🔒' : `${activeName} answered ${locked} 🔒`}
         </p>
-      )}
-      {myTurn && sent && (
-        <p className="mt-3 text-center text-sm font-medium text-ink/60">Locked in 🔒</p>
+      ) : (
+        !myTurn && (
+          <p className="mt-3 text-center text-sm font-medium text-ink/60">
+            {activeName} is answering…
+          </p>
+        )
       )}
     </div>
   )

@@ -54,9 +54,26 @@ export function chooseAnswer(
   return wrong[Math.floor(rng() * wrong.length)]
 }
 
-/** A pause before answering, so turns are watchable. Harder cards take longer. */
+/**
+ * A pause before answering, so turns are watchable. Harder cards take longer.
+ *
+ * Roughly 5-10 seconds. The old 1.5-4s made a table of computers rattle through a
+ * game faster than anyone could follow — a human is still reading the stem at four
+ * seconds, and an opponent who has already answered by then reads as a script
+ * rather than a player.
+ */
 export function thinkTimeMs(tier: Tier, rng: () => number = Math.random): number {
-  return 1200 + tier * 350 + rng() * 900
+  return 5000 + tier * 350 + rng() * 2800
+}
+
+/** Before rolling. Long enough that a computer's turn does not start mid-blink. */
+export function rollDelayMs(rng: () => number = Math.random): number {
+  return 2200 + rng() * 1600
+}
+
+/** Before picking which piece moves — a real decision, so it deserves a beat. */
+export function choiceDelayMs(rng: () => number = Math.random): number {
+  return 1800 + rng() * 1400
 }
 
 /**

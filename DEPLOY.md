@@ -19,6 +19,21 @@ Then seed the question bank into the deployed database:
 npm run import:pdf -- --remote
 ```
 
+## Migrating a database that is already live
+
+`schema.sql` only creates tables that do not exist, so a database deployed before
+question difficulty existed will not pick up the new column from it. Run the
+migration once, before deploying the new Worker:
+
+```bash
+npm run db:migrate:remote
+```
+
+It adds `questions.difficulty` and labels every question already in there from its
+tier — tiers 1–2 Easy, 3–4 Medium, 5–6 Hard — which is the same ordering the source
+PDF uses. Re-classify from `/admin` afterwards. Running it a second time fails on
+the duplicate column, which is the migration saying it has nothing left to do.
+
 ## What runs where
 
 | Piece | Cloudflare |
