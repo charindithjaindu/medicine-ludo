@@ -1,0 +1,26 @@
+[Unit]
+Description=Medicine Ludo multiplayer game
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/medicine-ludo
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/medicine-ludo.env
+ExecStart=/home/ubuntu/.nvm/versions/node/v24.19.0/bin/node server/dist/index.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+LimitNOFILE=65536
+MemoryMax=768M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/medicine-ludo
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

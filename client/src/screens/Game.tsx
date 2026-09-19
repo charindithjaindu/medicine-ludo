@@ -4,7 +4,6 @@ import {
   ANSWER_SECONDS,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
-  TIER_NAMES,
   TIER_POINTS,
   type AnswerLetter,
   type Difficulty,
@@ -604,7 +603,7 @@ function QuestionPanel({
   const q = game.question!
   // The die face, not the card's own tier: it is what the move and the points are
   // worth, and in a difficulty-filtered room the card may come from another tier.
-  const tier = (game.roll ?? q.tier) as Tier
+  const tier = (game.roll ?? 1) as Tier
   const left = useCountdown(q.deadline)
   // Local state so the tap responds instantly; the server's `chosenAnswer` is what
   // everyone *else* at the table sees, and it is the one that locks the buttons.
@@ -637,7 +636,7 @@ function QuestionPanel({
               TIER_COLORS[tier]
             }`}
           >
-            {TIER_NAMES[tier]}
+            {DIFFICULTY_NAMES[q.difficulty]}
           </span>
           <p className="mt-0.5 text-xs font-medium text-ink/60">
             {TIER_POINTS[tier]} pts · move {game.roll} ·{' '}

@@ -1,4 +1,4 @@
-import type { Difficulty, LeaderboardRow, PlayerProfile, Question, Tier } from '@shared/types.js'
+import type { Difficulty, LeaderboardRow, PlayerProfile, Question } from '@shared/types.js'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -43,7 +43,7 @@ export interface ImportResponse {
   dryRun: boolean
   summary: { created: number; updated: number; rejected: number }
   plan: ImportPlanRow[]
-  counts?: Record<Tier, number>
+  counts?: Record<Difficulty, number>
 }
 
 export const adminApi = {
@@ -58,19 +58,17 @@ export const adminApi = {
   logout: () => request<{ ok: true }>('/api/admin/logout', { method: 'POST' }),
 
   questions: (params: {
-    tier?: Tier | ''
     difficulty?: Difficulty | ''
     active?: string
     search?: string
   }) => {
     const qs = new URLSearchParams()
-    if (params.tier) qs.set('tier', String(params.tier))
     if (params.difficulty) qs.set('difficulty', params.difficulty)
     if (params.active && params.active !== 'all') qs.set('active', params.active)
     if (params.search) qs.set('search', params.search)
     return request<{
       questions: Question[]
-      counts: Record<Tier, number>
+      counts: Record<Difficulty, number>
       difficultyCounts: Record<Difficulty, number>
     }>(`/api/admin/questions?${qs}`)
   },

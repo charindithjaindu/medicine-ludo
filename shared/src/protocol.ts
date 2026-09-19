@@ -1,11 +1,4 @@
-/**
- * The websocket envelope.
- *
- * Socket.IO cannot run on Cloudflare Workers, so the wire format is this small
- * hand-rolled protocol instead. It keeps Socket.IO's one genuinely useful feature —
- * request/response acknowledgements — so callers can still surface the server's
- * rejection reason rather than guessing why nothing happened.
- */
+/** WebSocket messages with request/response acknowledgements. */
 
 import type { GameState, GameSummaryRow, RoomView, Winner } from './types.js'
 

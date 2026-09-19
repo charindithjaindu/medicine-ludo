@@ -1,15 +1,4 @@
-/**
- * Realtime transport.
- *
- * A plain WebSocket rather than Socket.IO, because Socket.IO cannot run on
- * Cloudflare Workers. It keeps the same surface the screens already use —
- * `socket.on(...)` and an `emit()` that resolves with the server's acknowledgement
- * — so the UI is unaware of the change.
- *
- * One connection per room. `createRoom` and `joinRoom` are handled here because
- * they decide *which* room to connect to; everything else is a message on the
- * open socket.
- */
+/** One acknowledged WebSocket connection per player, with automatic reconnection. */
 
 import type { Ack, BoardPreset, Difficulty, GameMode } from '@shared/types.js'
 import type { AckMessage, ServerMessage } from '@shared/protocol.js'
@@ -36,51 +25,59 @@ function socketUrl(code: string, playerId: string): string {
 }
 
 function open(code: string, playerId: string): Promise<Ack<{ code: string }>> {
+  // Replace the previous socket before opening another. Its callbacks cannot reconnect it.
+  for (const done of pending.values()) done({ ok: false, error: 'Connection replaced' })
+  pending.clear()
+  const previous = ws
+  ws = null
+  previous?.close(1000, 'replaced')
   return new Promise((resolve) => {
     let settled = false
-    const socket = new WebSocket(socketUrl(code, playerId))
-    ws = socket
-
-    socket.onopen = () => {
+    const connection = new WebSocket(socketUrl(code, playerId))
+    ws = connection
+    const timeout = setTimeout(() => {
+      if (settled) return
       settled = true
-      reconnectAttempts = 0
-      current = { code, playerId }
-      fire('connect', undefined)
-      resolve({ ok: true, data: { code } })
+      resolve({ ok: false, error: 'Could not reach the game server' })
+      connection.close()
+    }, 10000)
+    const settle = (result: Ack<{ code: string }>) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
     }
-
-    socket.onmessage = (raw) => {
+    connection.onmessage = (raw) => {
+      if (ws !== connection) return
       let message: ServerMessage
-      try {
-        message = JSON.parse(String(raw.data))
-      } catch {
-        return
+      try { message = JSON.parse(String(raw.data)) } catch { return }
+      // The first room event, rather than the TCP handshake, confirms admission.
+      if (message.t === 'event' && message.event === 'room' && !settled) {
+        reconnectAttempts = 0
+        current = { code, playerId }
+        settle({ ok: true, data: { code } })
+        fire('connect', undefined)
       }
       if (message.t === 'ack') {
-        const settle = pending.get(message.id)
+        const done = pending.get(message.id)
         pending.delete(message.id)
-        settle?.(message as Ack)
-        return
-      }
-      fire(message.event, message.payload)
+        done?.(message as Ack)
+      } else fire(message.event, message.payload)
     }
-
-    socket.onclose = (event) => {
-      if (ws === socket) ws = null
-      // Closing before we ever opened means the server refused us.
-      if (!settled) {
-        settled = true
-        resolve({ ok: false, error: refusalReason(event.code) })
-        return
-      }
-      if (current) scheduleReconnect()
+    connection.onclose = (event) => {
+      clearTimeout(timeout)
+      settle({ ok: false, error: event.reason || refusalReason(event.code) })
+      if (ws !== connection) return
+      ws = null
+      for (const done of pending.values()) done({ ok: false, error: 'Connection interrupted' })
+      pending.clear()
+      if (event.code === 4003 || event.code === 4004) {
+        current = null
+        fire('roomClosed', { reason: event.reason || refusalReason(event.code) })
+      } else if (current) scheduleReconnect()
     }
-
-    socket.onerror = () => {
-      if (!settled) {
-        settled = true
-        resolve({ ok: false, error: 'Could not reach the game server' })
-      }
+    connection.onerror = () => {
+      settle({ ok: false, error: 'Could not reach the game server' })
     }
   })
 }
@@ -93,7 +90,7 @@ function refusalReason(closeCode: number): string {
 
 function scheduleReconnect() {
   if (reconnectTimer || !current) return
-  const delay = Math.min(8000, 400 * 2 ** reconnectAttempts++)
+  const delay = Math.min(8000, 400 * 2 ** reconnectAttempts++) + Math.random() * 500
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null
     if (!current) return

@@ -1,74 +1,96 @@
-# Deploying to Cloudflare
+# Ubuntu deployment
 
-Everything is built and verified locally. Three commands are left, and the first
-one needs a browser, so it has to be you.
+Production: https://medicine-ludo.jaindu.me on `ubuntu@169.58.129.250`.
 
-```bash
-npx wrangler login      # opens a browser
-npm run cf:init         # creates D1, writes its id, pushes schema + secrets
-npm run deploy          # builds the client and deploys the Worker
-```
+The app uses one Node.js process, Express, native WebSockets, and SQLite in WAL
+mode. Nginx terminates TLS. No Cloudflare compute or database services are needed;
+Cloudflare is only the DNS provider, with this record set to DNS-only.
 
-`cf:init` prints the admin password it uploaded (taken from `.env`, or generated if
-that file is missing). `deploy` prints the live URL, something like
-`https://medicine-ludo.<your-subdomain>.workers.dev`.
+## Files and services
 
-Then seed the question bank into the deployed database:
+- Checkout: `/home/ubuntu/medicine-ludo`
+- Node: `/home/ubuntu/.nvm/versions/node/v24.19.0/bin/node`
+- Secrets: `/etc/medicine-ludo.env` (root-only, loaded by systemd)
+- Database: `/var/lib/medicine-ludo/medicine-ludo.sqlite`
+- Backups: `/var/lib/medicine-ludo/backups` (14 daily backups, plus the original D1 export)
+- Service: `medicine-ludo.service`
+- Backup timer: `medicine-ludo-backup.timer`
+- Nginx: `/etc/nginx/conf.d/medicine-ludo.conf`
+- Certificate: `/etc/letsencrypt/live/medicine-ludo.jaindu.me/`
 
-```bash
-npm run import:pdf -- --remote
-```
+The admin password was generated for this deployment. Read it through SSH with
+`sudo cat /etc/medicine-ludo.env`; keep the file private. Admin login is at `/admin`.
 
-## Migrating a database that is already live
-
-`schema.sql` only creates tables that do not exist, so a database deployed before
-question difficulty existed will not pick up the new column from it. Run the
-migration once, before deploying the new Worker:
+## Update
 
 ```bash
-npm run db:migrate:remote
+ssh ubuntu@169.58.129.250
+export PATH=/home/ubuntu/.nvm/versions/node/v24.19.0/bin:$PATH
+cd /home/ubuntu/medicine-ludo
+git pull --ff-only
+npm ci
+npm run typecheck
+npm test
+npm run build
+sudo systemctl start medicine-ludo-backup
+sudo systemctl restart medicine-ludo
+curl --fail http://127.0.0.1:8787/api/health
 ```
 
-It adds `questions.difficulty` and labels every question already in there from its
-tier — tiers 1–2 Easy, 3–4 Medium, 5–6 Hard — which is the same ordering the source
-PDF uses. Re-classify from `/admin` afterwards. Running it a second time fails on
-the duplicate column, which is the migration saying it has nothing left to do.
+Saved games resume when players reconnect after restart. Question deadlines restart
+at a full minute on recovery. Empty rooms are paused and removed after 90 seconds;
+room snapshots expire after six hours of downtime. Players, questions, statistics,
+and leaderboard results are permanent. Completed-game IDs prevent duplicate awards.
 
-## What runs where
+Run exactly **one** app process; do not enable PM2 cluster mode or multiple replicas.
+Room coordination is in-process. The limits are 500 rooms and 2,000 sockets; these
+are safeguards, not a promise of that capacity. systemd restarts failures and caps
+this app at 768 MB so it cannot consume all memory from other VM services.
 
-| Piece | Cloudflare |
-|---|---|
-| The app (React build) | Workers static assets, SPA routing so `/admin` works |
-| REST API + websocket routing | the Worker |
-| A room in progress | one Durable Object per 6-digit code |
-| Players, leaderboard, questions | D1 |
-| `ADMIN_PASSWORD`, `SESSION_SECRET` | Worker secrets |
+## Monitor and back up
 
-A Durable Object gives each room the single authoritative instance a turn-based
-game needs — every player in a room is served by the same object, so there is no
-cross-instance state to reconcile.
+```bash
+sudo systemctl status medicine-ludo
+sudo journalctl -u medicine-ludo -f
+sudo systemctl list-timers medicine-ludo-backup.timer
+sudo systemctl start medicine-ludo-backup
+sudo nginx -t
+```
 
-All of it fits the free plan: the DO class is SQLite-backed, which is the kind the
-free tier allows.
+A log line each minute reports room/socket counts, RSS and event-loop latency.
+Backups use SQLite's online backup API and run an integrity check. Daily copies on
+the VM protect against accidental edits; copy them off the VM for protection against
+disk/VM loss. Never copy only the live `.sqlite` file while WAL writes are active.
+To restore, stop the app, retain the current database and its WAL/SHM files together,
+restore a verified backup as the database, ensure ubuntu owns it, then restart.
 
-## Local development
+The certificate renews with Certbot's existing timer and a dedicated webroot.
+The renewal deploy hook reloads Nginx after validating its configuration.
+Do not overwrite the global nginx.conf or other site files.
 
-`npm run dev` runs the same Worker through `wrangler dev` with a local D1 and local
-Durable Objects, plus Vite for the client with hot reload. Local and deployed run
-identical server code.
+## Load testing
 
-Local secrets live in `worker/.dev.vars` (gitignored). `REVEAL_MS` and
-`AI_DELAY_SCALE` can go in there too, to speed the game up while testing.
+Use a disposable database and a separate port. The harness creates real players and
+records game statistics, so do not run it against the production database.
 
-## Two things to know
+```bash
+DATABASE_PATH=/tmp/ludo-load.sqlite PORT=18787 npm start
+# Seed the disposable database first using the importer or a verified backup.
+BASE=http://127.0.0.1:18787 PLAYERS=200 PER_ROOM=4 npm run loadtest
+BASE=http://127.0.0.1:18787 PLAYERS=200 PER_ROOM=1 npm run loadtest
+```
 
-**Rooms are in memory.** A Durable Object stays alive while anyone is connected, so
-a game in progress is safe, but a room is not durable across an eviction. That is
-fine for testing and matches the old behaviour, where rooms lived in the server's
-memory. Making games survive would mean persisting `GameState` to DO storage on
-each turn.
+`PER_ROOM=4` tests 50 multiplayer games; `PER_ROOM=1` tests 200 rooms with three
+AI opponents each. `DURATION_SECONDS` defaults to 30. For a completed-game test use
+`BASE=... ADMIN_PASSWORD=... npm run playtest -- ffa quick 1` with test-only
+`REVEAL_MS=10 ANSWER_LOCK_MS=10`. Do not speed up production timers.
 
-**Re-importing the PDF is not available in the admin panel when deployed.** It
-shells out to `pdftotext`, which Workers cannot run — the button returns a message
-saying so. Use `npm run import:pdf -- --remote` from your machine instead.
-Everything else in the admin panel works normally.
+## Migration notes
+
+The deployed Worker differed from the old GitHub checkout. The migration preserves
+its difficulty-only question bank, Easy-only gameplay and AI accuracy settings.
+Numbered question tiers are no longer stored; dice still control movement and scores.
+The original D1 SQL export is retained privately. Browser storage belongs to a domain,
+so players moving from workers.dev must enter their existing six-digit player ID.
+Old in-progress Cloudflare rooms cannot transfer: the Worker held their game state
+only in memory. Newly created VM games have persistent snapshots.

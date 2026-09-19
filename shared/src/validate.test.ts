@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseDifficulty, validateQuestionDraft } from './validate.js'
 
 const base = {
-  tier: 3,
+  difficulty: 'medium',
   text: 'Which enzyme conjugates bilirubin?',
   options: ['UGT1A1', 'Heme oxygenase', 'Biliverdin reductase', 'G6PD'],
   answer: 'A',
@@ -15,14 +15,8 @@ describe('question difficulty', () => {
     expect(result.draft!.difficulty).toBe('hard')
   })
 
-  it('falls back to the tier when nobody has classified it', () => {
-    // The seeded deck runs EASY (tier 1) through VERY DIFFICULT (tier 6).
-    expect(validateQuestionDraft({ ...base, tier: 1 }).draft!.difficulty).toBe('easy')
-    expect(validateQuestionDraft({ ...base, tier: 2 }).draft!.difficulty).toBe('easy')
-    expect(validateQuestionDraft({ ...base, tier: 3 }).draft!.difficulty).toBe('medium')
-    expect(validateQuestionDraft({ ...base, tier: 4 }).draft!.difficulty).toBe('medium')
-    expect(validateQuestionDraft({ ...base, tier: 5 }).draft!.difficulty).toBe('hard')
-    expect(validateQuestionDraft({ ...base, tier: 6 }).draft!.difficulty).toBe('hard')
+  it('requires an explicit difficulty', () => {
+    expect(validateQuestionDraft({ ...base, difficulty: undefined }).ok).toBe(false)
   })
 
   it('rejects a difficulty it cannot make sense of', () => {

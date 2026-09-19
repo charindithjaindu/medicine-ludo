@@ -5,5 +5,12 @@ dist/
 .DS_Store
 *.log
 .dev.vars
-worker/seed-questions.sql
 *.tsbuildinfo
+
+.migration-backup/
+data/
+*.sqlite*
+server/seed-questions.sql
+
+.playwright-cli/
+output/

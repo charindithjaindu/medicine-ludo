@@ -1,12 +1,9 @@
 import {
   ANSWER_LETTERS,
   DIFFICULTIES,
-  TIERS,
-  difficultyForTier,
   type AnswerLetter,
   type Difficulty,
   type QuestionDraft,
-  type Tier,
 } from './types.js'
 
 export interface ValidationResult {
@@ -22,9 +19,6 @@ export interface ValidationResult {
 export function validateQuestionDraft(input: unknown): ValidationResult {
   const errors: string[] = []
   const raw = (input ?? {}) as Record<string, unknown>
-
-  const tier = Number(raw.tier)
-  if (!TIERS.includes(tier as Tier)) errors.push('Tier must be a number from 1 to 6.')
 
   const text = typeof raw.text === 'string' ? raw.text.trim() : ''
   if (!text) errors.push('Question text is required.')
@@ -44,7 +38,7 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
 
   const difficultyRaw = raw.difficulty
   const difficulty = parseDifficulty(difficultyRaw)
-  if (difficultyRaw !== undefined && difficultyRaw !== null && difficultyRaw !== '' && !difficulty) {
+  if (!difficulty) {
     errors.push(`Difficulty must be one of ${DIFFICULTIES.join(', ')}.`)
   }
 
@@ -64,10 +58,7 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
     ok: true,
     errors: [],
     draft: {
-      tier: tier as Tier,
-      // An unlabelled question is not an error: the tier ordering is a good enough
-      // first guess, and an admin can correct it later.
-      difficulty: difficulty ?? difficultyForTier(tier as Tier),
+      difficulty: difficulty!,
       text,
       options: options as [string, string, string, string],
       answer: answer as AnswerLetter,

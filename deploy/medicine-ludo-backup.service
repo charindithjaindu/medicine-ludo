@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up Medicine Ludo SQLite database
+[Service]
+Type=oneshot
+User=ubuntu
+UMask=0077
+ExecStart=/usr/bin/python3 /home/ubuntu/medicine-ludo/deploy/backup.py

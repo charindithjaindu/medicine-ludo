@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  SINGLE_LEVEL,
   DIFFICULTIES,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
@@ -40,7 +41,7 @@ export default function Menu({
   const [view, setView] = useState<View>('home')
   const [mode, setMode] = useState<GameMode>('ffa')
   const [preset, setPreset] = useState<BoardPreset>('standard')
-  const [difficulty, setDifficulty] = useState<Difficulty>('medium')
+  const [difficulty, setDifficulty] = useState<Difficulty>(SINGLE_LEVEL ?? 'medium')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -190,7 +191,7 @@ export default function Menu({
             Question difficulty
           </p>
           <div className="mb-2 grid grid-cols-3 gap-2">
-            {DIFFICULTIES.map((d) => (
+            {(SINGLE_LEVEL ? [SINGLE_LEVEL] : DIFFICULTIES).map((d) => (
               <Choice
                 key={d}
                 active={difficulty === d}

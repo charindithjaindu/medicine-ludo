@@ -89,10 +89,10 @@ export default function ImportExport({ onChanged }: { onChanged: () => void }) {
       <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
         <h2 className="font-semibold">Bulk import</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Columns: <code className="text-xs">tier, text, option_a, option_b, option_c, option_d,
-          answer</code> — plus optional <code className="text-xs">difficulty</code> (
+          Columns: <code className="text-xs">difficulty, text, option_a, option_b, option_c, option_d,
+          answer</code> — difficulty is one of (
           <code className="text-xs">easy</code> / <code className="text-xs">medium</code> /{' '}
-          <code className="text-xs">hard</code>; left out, it is taken from the tier),{' '}
+          <code className="text-xs">hard</code>),{' '}
           <code className="text-xs">id</code>, <code className="text-xs">source_card</code>,{' '}
           <code className="text-xs">explanation</code>, <code className="text-xs">active</code>. A
           row with a matching <code className="text-xs">id</code> or{' '}
@@ -126,8 +126,8 @@ export default function ImportExport({ onChanged }: { onChanged: () => void }) {
           rows={8}
           placeholder={
             format === 'csv'
-              ? 'tier,difficulty,text,option_a,option_b,option_c,option_d,answer\n1,easy,What is…,First,Second,Third,Fourth,B'
-              : '[{"tier":1,"difficulty":"easy","text":"What is…","options":["a","b","c","d"],"answer":"B"}]'
+              ? 'difficulty,text,option_a,option_b,option_c,option_d,answer\neasy,What is…,First,Second,Third,Fourth,B'
+              : '[{"difficulty":"easy","text":"What is…","options":["a","b","c","d"],"answer":"B"}]'
           }
           className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs outline-none focus:border-slate-900"
         />

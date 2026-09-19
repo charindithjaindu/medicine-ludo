@@ -1,15 +1,4 @@
-/**
- * Admin API on Workers.
- *
- * Same rules as before — password login, signed session cookie, questions CRUD,
- * bulk import with a dry run, and the invariant that a tier can never reach zero
- * active questions. Signing moves from node:crypto to Web Crypto.
- *
- * Re-importing the source PDF is not available here: it shells out to `pdftotext`,
- * which does not exist on Workers. Run `npm run import:pdf -- --remote` instead.
- */
-
-import { TIERS, isDifficulty, type Difficulty, type Question, type Tier } from '@shared/types.js'
+import { DIFFICULTIES, isDifficulty, type Difficulty, type Question } from '@shared/types.js'
 import { validateQuestionDraft } from '@shared/validate.js'
 import { parseCsvObjects, toCsv } from './csv.js'
 import type { Db } from './db.js'
@@ -71,17 +60,13 @@ export interface AdminEnv {
   SESSION_SECRET?: string
 }
 
-/**
- * The die face picks the tier, so a tier with no active questions is a roll the
- * game cannot answer. Every mutation is checked against this.
- */
-async function guardTierStock(db: Db, before: Record<Tier, number>): Promise<string | null> {
-  const after = await db.activeCountByTier()
-  const newlyEmpty = TIERS.filter((t) => after[t] === 0 && before[t] > 0)
+function guardStock(db: Db, before: Record<Difficulty, number>): string | null {
+  const after = db.activeCountByDifficulty()
+  const newlyEmpty = DIFFICULTIES.filter((t) => after[t] === 0 && before[t] > 0)
   if (newlyEmpty.length === 0) return null
   return (
-    `That would leave tier ${newlyEmpty.join(', ')} with no active questions. ` +
-    'Every tier needs at least one, because the die face picks the tier.'
+    `That would leave difficulty ${newlyEmpty.join(', ')} with no active questions. ` +
+    'Each available difficulty needs at least one active question.'
   )
 }
 
@@ -129,34 +114,31 @@ export async function handleAdmin(
   // -- everything below requires a session ----------------------------------
 
   if (path === '/questions' && request.method === 'GET') {
-    const tier = url.searchParams.get('tier')
     const active = url.searchParams.get('active')
     const difficulty = url.searchParams.get('difficulty')
-    const questions = await db.listQuestions({
-      tier: tier ? (Number(tier) as Tier) : undefined,
+    const questions = db.listQuestions({
       difficulty: isDifficulty(difficulty) ? (difficulty as Difficulty) : undefined,
       active: active === null || active === 'all' ? undefined : active === 'true',
       search: url.searchParams.get('search') ?? undefined,
     })
     return json({
       questions,
-      counts: await db.activeCountByTier(),
-      difficultyCounts: await db.activeCountByDifficulty(),
+      counts: db.activeCountByDifficulty(),
+      difficultyCounts: db.activeCountByDifficulty(),
     })
   }
 
   if (path === '/questions' && request.method === 'POST') {
     const result = validateQuestionDraft(await request.json().catch(() => ({})))
     if (!result.ok) return json({ error: result.errors.join(' ') }, 400)
-    return json({ question: await db.createQuestion(result.draft!) }, 201)
+    return json({ question: db.createQuestion(result.draft!) }, 201)
   }
 
   if (path === '/questions/export' && request.method === 'GET') {
-    const questions = await db.listQuestions()
+    const questions = db.listQuestions()
     if (url.searchParams.get('format') === 'csv') {
       const rows = questions.map((q) => ({
         id: q.id,
-        tier: q.tier,
         difficulty: q.difficulty,
         source_card: q.sourceCard,
         text: q.text,
@@ -188,36 +170,34 @@ export async function handleAdmin(
     return json(
       {
         error:
-          'The PDF importer needs pdftotext, which Workers cannot run. ' +
-          'Run `npm run import:pdf -- --remote` from your machine instead.',
+          'Run `npm run import:pdf` on the server with DATABASE_PATH set to the production database.',
       },
       501,
     )
   }
 
   if (path === '/questions/stats/reset' && request.method === 'POST') {
-    await db.resetQuestionStats()
+    db.resetQuestionStats()
     return json({ ok: true })
   }
 
   const statsMatch = path.match(/^\/questions\/(\d+)\/stats\/reset$/)
   if (statsMatch && request.method === 'POST') {
     const id = Number(statsMatch[1])
-    if (!(await db.getQuestion(id))) return json({ error: 'No such question' }, 404)
-    await db.resetQuestionStats(id)
-    return json({ question: await db.getQuestion(id) })
+    if (!(db.getQuestion(id))) return json({ error: 'No such question' }, 404)
+    db.resetQuestionStats(id)
+    return json({ question: db.getQuestion(id) })
   }
 
   const idMatch = path.match(/^\/questions\/(\d+)$/)
   if (idMatch) {
     const id = Number(idMatch[1])
-    const existing = await db.getQuestion(id)
+    const existing = db.getQuestion(id)
     if (!existing) return json({ error: 'No such question' }, 404)
 
     if (request.method === 'PATCH') {
       const patch = (await request.json().catch(() => ({}))) as Record<string, unknown>
       const merged = {
-        tier: patch.tier ?? existing.tier,
         difficulty: patch.difficulty ?? existing.difficulty,
         text: patch.text ?? existing.text,
         options: patch.options ?? existing.options,
@@ -228,24 +208,19 @@ export async function handleAdmin(
       const result = validateQuestionDraft(merged)
       if (!result.ok) return json({ error: result.errors.join(' ') }, 400)
 
-      const before = await db.activeCountByTier()
-      const updated = await db.updateQuestion(id, result.draft!)
-      const problem = await guardTierStock(db, before)
-      if (problem) {
-        await db.updateQuestion(id, existing) // D1 has no interactive rollback; put it back
-        return json({ error: problem }, 409)
-      }
-      return json({ question: updated })
+      return db.sql.transaction(() => {
+        const before = db.activeCountByDifficulty()
+        const updated = db.updateQuestion(id, result.draft!)
+        const problem = guardStock(db, before)
+        if (problem) { db.updateQuestion(id, existing); return json({ error: problem }, 409) }
+        return json({ question: updated })
+      })
     }
 
     if (request.method === 'DELETE') {
-      const before = await db.activeCountByTier()
-      await db.deleteQuestion(id)
-      const problem = await guardTierStock(db, before)
-      if (problem) {
-        await db.createQuestion(existing) // restore; it gets a new id
-        return json({ error: problem }, 409)
-      }
+      const counts = db.activeCountByDifficulty()
+      if (existing.active && counts[existing.difficulty] <= 1) return json({ error: 'Keep at least one active question in this difficulty.' }, 409)
+      db.deleteQuestion(id)
       return json({ ok: true })
     }
   }
@@ -277,12 +252,12 @@ async function handleImport(request: Request, db: Db): Promise<Response> {
     return json({ error: `Could not parse that: ${(err as Error).message}` }, 400)
   }
 
-  const existing = await db.listQuestions()
+  const existing = db.listQuestions()
   const byId = new Map(existing.map((q) => [q.id, q]))
   const bySourceCard = new Set(existing.map((q) => q.sourceCard).filter((c) => c !== null))
 
   const plan: Array<{ row: number; action: 'create' | 'update' | 'reject'; detail: string }> = []
-  const applies: Array<() => Promise<unknown>> = []
+  const applies: Array<() => unknown> = []
 
   incoming.forEach((raw, i) => {
     const result = validateQuestionDraft(raw)
@@ -321,14 +296,13 @@ async function handleImport(request: Request, db: Db): Promise<Response> {
 
   if (dryRun) return json({ dryRun: true, summary, plan })
 
-  const before = await db.activeCountByTier()
-  for (const apply of applies) await apply()
-  const problem = await guardTierStock(db, before)
-  if (problem) return json({ error: problem, summary, plan }, 409)
-
-  return json({ dryRun: false, summary, plan, counts: await db.activeCountByTier() })
-}
-
-export function isAdminPath(pathname: string): boolean {
-  return pathname.startsWith('/api/admin')
+  try {
+    return db.sql.transaction(() => {
+      const before = db.activeCountByDifficulty()
+      for (const apply of applies) apply()
+      const problem = guardStock(db, before)
+      if (problem) throw new Error(problem)
+      return json({ dryRun: false, summary, plan, counts: db.activeCountByDifficulty() })
+    })
+  } catch (error) { return json({ error: (error as Error).message, summary, plan }, 409) }
 }

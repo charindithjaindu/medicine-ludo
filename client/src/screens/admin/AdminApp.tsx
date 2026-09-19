@@ -3,11 +3,8 @@ import {
   DIFFICULTIES,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
-  TIER_NAMES,
-  TIERS,
   type Difficulty,
   type Question,
-  type Tier,
 } from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
 import QuestionEditor from './QuestionEditor.tsx'
@@ -80,9 +77,7 @@ type SortKey = 'default' | 'rate' | 'asked'
 
 function Console({ onOut }: { onOut: () => void }) {
   const [questions, setQuestions] = useState<Question[]>([])
-  const [counts, setCounts] = useState<Record<Tier, number> | null>(null)
   const [difficultyCounts, setDifficultyCounts] = useState<Record<Difficulty, number> | null>(null)
-  const [tier, setTier] = useState<Tier | ''>('')
   const [difficulty, setDifficulty] = useState<Difficulty | ''>('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -95,9 +90,8 @@ function Console({ onOut }: { onOut: () => void }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await adminApi.questions({ tier, difficulty, active: activeFilter, search })
+      const r = await adminApi.questions({ difficulty, active: activeFilter, search })
       setQuestions(r.questions)
-      setCounts(r.counts)
       setDifficultyCounts(r.difficultyCounts)
       setError(null)
     } catch (err) {
@@ -105,7 +99,7 @@ function Console({ onOut }: { onOut: () => void }) {
     } finally {
       setLoading(false)
     }
-  }, [tier, difficulty, activeFilter, search])
+  }, [difficulty, activeFilter, search])
 
   useEffect(() => {
     const t = setTimeout(load, search ? 250 : 0)
@@ -160,29 +154,6 @@ function Console({ onOut }: { onOut: () => void }) {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 p-5">
-        {counts && (
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            {TIERS.map((t) => (
-              <button
-                key={t}
-                onClick={() => setTier(tier === t ? '' : t)}
-                className={`rounded-lg px-2 py-2 text-left text-xs ring-1 transition ${
-                  tier === t
-                    ? 'bg-slate-900 text-white ring-slate-900'
-                    : counts[t] === 0
-                      ? 'bg-rose-50 ring-rose-300'
-                      : 'bg-white ring-slate-200 hover:ring-slate-400'
-                }`}
-              >
-                <span className="block font-semibold">{TIER_NAMES[t]}</span>
-                <span className={tier === t ? 'text-slate-300' : 'text-slate-500'}>
-                  die {t} · {counts[t]} active
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-
         {difficultyCounts && (
           <div className="grid grid-cols-3 gap-2">
             {DIFFICULTIES.map((d) => (
@@ -239,7 +210,7 @@ function Console({ onOut }: { onOut: () => void }) {
                 onChange={(e) => setSort(e.target.value as SortKey)}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
-                <option value="default">Sort: tier order</option>
+                <option value="default">Sort: card order</option>
                 <option value="rate">Sort: worst correct-rate first</option>
                 <option value="asked">Sort: most asked</option>
               </select>
@@ -255,7 +226,6 @@ function Console({ onOut }: { onOut: () => void }) {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-3 py-2.5">Tier</th>
                     <th className="px-3 py-2.5">Difficulty</th>
                     <th className="px-3 py-2.5">Question</th>
                     <th className="px-3 py-2.5 text-center">Ans</th>
@@ -268,14 +238,14 @@ function Console({ onOut }: { onOut: () => void }) {
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
                         Loading…
                       </td>
                     </tr>
                   )}
                   {!loading && rows.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
                         No questions match.
                       </td>
                     </tr>
@@ -285,11 +255,6 @@ function Console({ onOut }: { onOut: () => void }) {
                       key={q.id}
                       className={`border-t border-slate-100 ${q.active ? '' : 'bg-slate-50 text-slate-400'}`}
                     >
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">
-                          {q.tier} · {TIER_NAMES[q.tier]}
-                        </span>
-                      </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800">
                           {DIFFICULTY_EMOJI[q.difficulty]} {DIFFICULTY_NAMES[q.difficulty]}
@@ -354,7 +319,7 @@ function Console({ onOut }: { onOut: () => void }) {
 
             <p className="text-xs text-slate-500">
               A low correct-rate usually means the card is ambiguous or the answer is wrong. A
-              correct-rate near 100% on a hard tier means it belongs in an easier one. Retiring
+              correct-rate near 100% on a hard difficulty means it belongs in an easier one. Retiring
               keeps a question's stats and pulls it out of future games.
             </p>
           </>

@@ -4,7 +4,7 @@
  *
  *   npm run playtest                      # against `npm run dev`
  *   npm run playtest -- teams standard    # mode and board
- *   BASE=https://… npm run playtest       # against the deployed Worker
+ *   BASE=https://… npm run playtest       # against the deployed server
  *
  * The answer key comes from the admin export, so this exercises the admin API too.
  * Real players, not the in-game AI — this is what verifies the leaderboard path
@@ -27,13 +27,13 @@ const ACCURACY = Number(process.argv[4] ?? 0.75)
 
 function adminPassword(): string {
   if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD
-  for (const file of ['.env', 'worker/.dev.vars']) {
+  for (const file of ['.env']) {
     const p = path.join(root, file)
     if (!fs.existsSync(p)) continue
     const m = /^ADMIN_PASSWORD=(.*)$/m.exec(fs.readFileSync(p, 'utf8'))
     if (m) return m[1].trim()
   }
-  throw new Error('No ADMIN_PASSWORD found in env, .env or worker/.dev.vars')
+  throw new Error('No ADMIN_PASSWORD found in env or .env')
 }
 
 /** The answer key, so the harness can hit a target accuracy on purpose. */
@@ -60,12 +60,12 @@ async function createPlayer(name: string): Promise<string> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
   })
-  return (await res.json()).player.id
+  return ((await res.json()) as { player: { id: string } }).player.id
 }
 
 async function getPlayer(id: string) {
   const res = await fetch(`${BASE}/api/players/${id}`)
-  return (await res.json()).player
+  return ((await res.json()) as { player: import("../shared/src/types.js").PlayerProfile }).player
 }
 
 /** A thin client speaking the same envelope the browser uses. */
@@ -95,7 +95,7 @@ class Client {
         } else if (msg.event === 'game') {
           this.onGame?.(msg.payload)
         } else if (msg.event === 'gameOver') {
-          this.onGameOver?.(msg.payload)
+          this.onGameOver?.(msg.payload as never)
         }
       })
     })
@@ -130,7 +130,7 @@ async function main() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ playerId: ids[0], mode, preset }),
   })
-  const { code, error } = await roomRes.json()
+  const { code, error } = (await roomRes.json()) as { code?: string; error?: string }
   if (!code) throw new Error(`createRoom failed: ${error}`)
   console.log(`room ${code}`)
 
@@ -154,6 +154,8 @@ async function main() {
       if (game.turnSeat !== seat || game.phase === 'game-over') return
 
       if (game.phase === 'awaiting-roll') {
+        handledQuestion = -1
+        handledChoice = ''
         turns++
         if (turns % 15 === 0) console.log(`  …${turns} turns`)
         void client.call('roll')
@@ -163,7 +165,7 @@ async function main() {
         handledQuestion = game.question.id
         rolls++
         seen.add(game.question.id)
-        tierCount.set(game.question.tier, (tierCount.get(game.question.tier) ?? 0) + 1)
+        tierCount.set(game.roll!, (tierCount.get(game.roll!) ?? 0) + 1)
         const truth = answerKey.get(game.question.id)!
         const letter: AnswerLetter =
           Math.random() < ACCURACY
@@ -212,7 +214,7 @@ async function main() {
     })),
   )
 
-  // Wait a beat for the D1 write, then check the leaderboard actually moved.
+  // Wait a beat for the database write, then check the leaderboard actually moved.
   await new Promise((r) => setTimeout(r, 800))
   console.log('\nleaderboard deltas:')
   let allGood = true

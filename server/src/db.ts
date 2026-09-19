@@ -1,8 +1,4 @@
-/**
- * D1 queries. Same schema and same SQL as the SQLite build it replaced — D1 speaks
- * SQLite — but every call is async.
- */
-
+import { Sqlite } from './sqlite.js'
 import type {
   AnswerLetter,
   Difficulty,
@@ -11,13 +7,11 @@ import type {
   PlayerProfile,
   Question,
   QuestionDraft,
-  Tier,
 } from '@shared/types.js'
-import { DIFFICULTIES, TIERS, difficultyForTier } from '@shared/types.js'
+import { DIFFICULTIES } from '@shared/types.js'
 
 interface QuestionRow {
   id: number
-  tier: number
   difficulty: string | null
   source_card: number | null
   text: string
@@ -36,11 +30,10 @@ interface QuestionRow {
 function toQuestion(row: QuestionRow): Question {
   return {
     id: row.id,
-    tier: row.tier as Tier,
-    // A row written before the column existed reads as NULL; fall back to the tier.
+    // Older unlabelled rows use the default difficulty.
     difficulty: DIFFICULTIES.includes(row.difficulty as Difficulty)
       ? (row.difficulty as Difficulty)
-      : difficultyForTier(row.tier as Tier),
+      : 'medium',
     sourceCard: row.source_card,
     text: row.text,
     options: [row.option_a, row.option_b, row.option_c, row.option_d],
@@ -67,27 +60,19 @@ function toProfile(row: Record<string, unknown>): PlayerProfile {
 
 const now = () => new Date().toISOString()
 
-/**
- * SQL mirror of `difficultyForTier`, so a row left unlabelled by an older write still
- * groups and filters as something rather than dropping out of every query.
- */
 const DIFFICULTY_EXPR =
-  "COALESCE(difficulty, CASE WHEN tier <= 2 THEN 'easy' WHEN tier <= 4 THEN 'medium' ELSE 'hard' END)"
+  "COALESCE(difficulty, 'medium')"
 
 export class Db {
-  constructor(private d1: D1Database) {}
+  constructor(readonly sql: Sqlite) {}
 
   // -- questions ------------------------------------------------------------
 
-  async listQuestions(
-    filter: { tier?: Tier; difficulty?: Difficulty; active?: boolean; search?: string } = {},
-  ): Promise<Question[]> {
+  listQuestions(
+    filter: { difficulty?: Difficulty; active?: boolean; search?: string } = {},
+  ): Question[] {
     const where: string[] = []
     const binds: unknown[] = []
-    if (filter.tier !== undefined) {
-      where.push('tier = ?')
-      binds.push(filter.tier)
-    }
     if (filter.difficulty !== undefined) {
       where.push(`${DIFFICULTY_EXPR} = ?`)
       binds.push(filter.difficulty)
@@ -105,34 +90,25 @@ export class Db {
     }
     const sql =
       `SELECT * FROM questions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}` +
-      ' ORDER BY tier, COALESCE(source_card, 1000000), id'
-    const { results } = await this.d1
+      ' ORDER BY COALESCE(source_card, 1000000), id'
+    const { results } = this.sql
       .prepare(sql)
       .bind(...binds)
       .all<QuestionRow>()
     return results.map(toQuestion)
   }
 
-  async getQuestion(id: number): Promise<Question | null> {
-    const row = await this.d1
+  getQuestion(id: number): Question | null {
+    const row = this.sql
       .prepare('SELECT * FROM questions WHERE id = ?')
       .bind(id)
       .first<QuestionRow>()
     return row ? toQuestion(row) : null
   }
 
-  async activeCountByTier(): Promise<Record<Tier, number>> {
-    const counts = Object.fromEntries(TIERS.map((t) => [t, 0])) as Record<Tier, number>
-    const { results } = await this.d1
-      .prepare('SELECT tier, COUNT(*) AS n FROM questions WHERE active = 1 GROUP BY tier')
-      .all<{ tier: number; n: number }>()
-    for (const r of results) counts[r.tier as Tier] = r.n
-    return counts
-  }
-
-  async activeCountByDifficulty(): Promise<Record<Difficulty, number>> {
+  activeCountByDifficulty(): Record<Difficulty, number> {
     const counts = Object.fromEntries(DIFFICULTIES.map((d) => [d, 0])) as Record<Difficulty, number>
-    const { results } = await this.d1
+    const { results } = this.sql
       .prepare(
         `SELECT ${DIFFICULTY_EXPR} AS difficulty, COUNT(*) AS n
          FROM questions WHERE active = 1 GROUP BY 1`,
@@ -144,27 +120,20 @@ export class Db {
     return counts
   }
 
-  /** The decks a room starts with: active questions of its difficulty, split by tier. */
-  async activeQuestionsByTier(difficulty?: Difficulty): Promise<Record<Tier, Question[]>> {
-    const byTier = Object.fromEntries(TIERS.map((t) => [t, [] as Question[]])) as Record<
-      Tier,
-      Question[]
-    >
-    for (const q of await this.listQuestions({ active: true, difficulty })) byTier[q.tier].push(q)
-    return byTier
+  activeQuestionsForPlay(difficulty?: Difficulty): Question[] {
+    return this.listQuestions({ active: true, difficulty })
   }
 
-  async createQuestion(draft: QuestionDraft): Promise<Question> {
+  createQuestion(draft: QuestionDraft): Question {
     const ts = now()
-    const result = await this.d1
+    const result = this.sql
       .prepare(
         `INSERT INTO questions
-           (tier, difficulty, source_card, text, option_a, option_b, option_c, option_d, answer, explanation, active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+           (difficulty, source_card, text, option_a, option_b, option_c, option_d, answer, explanation, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
       .bind(
-        draft.tier,
-        draft.difficulty ?? difficultyForTier(draft.tier),
+        draft.difficulty,
         draft.sourceCard ?? null,
         draft.text,
         draft.options[0],
@@ -178,14 +147,13 @@ export class Db {
         ts,
       )
       .first<{ id: number }>()
-    return (await this.getQuestion(result!.id))!
+    return (this.getQuestion(result!.id))!
   }
 
-  async updateQuestion(id: number, patch: Partial<QuestionDraft>): Promise<Question | null> {
-    const existing = await this.getQuestion(id)
+  updateQuestion(id: number, patch: Partial<QuestionDraft>): Question | null {
+    const existing = this.getQuestion(id)
     if (!existing) return null
     const merged = {
-      tier: patch.tier ?? existing.tier,
       difficulty: patch.difficulty ?? existing.difficulty,
       text: patch.text ?? existing.text,
       options: patch.options ?? existing.options,
@@ -193,13 +161,12 @@ export class Db {
       explanation: patch.explanation !== undefined ? patch.explanation : existing.explanation,
       active: patch.active !== undefined ? patch.active : existing.active,
     }
-    await this.d1
+    this.sql
       .prepare(
-        `UPDATE questions SET tier=?, difficulty=?, text=?, option_a=?, option_b=?, option_c=?, option_d=?,
+        `UPDATE questions SET difficulty=?, text=?, option_a=?, option_b=?, option_c=?, option_d=?,
          answer=?, explanation=?, active=?, updated_at=? WHERE id=?`,
       )
       .bind(
-        merged.tier,
         merged.difficulty,
         merged.text,
         merged.options[0],
@@ -216,30 +183,30 @@ export class Db {
     return this.getQuestion(id)
   }
 
-  async deleteQuestion(id: number): Promise<void> {
-    await this.d1.prepare('DELETE FROM questions WHERE id = ?').bind(id).run()
+  deleteQuestion(id: number): void {
+    this.sql.prepare('DELETE FROM questions WHERE id = ?').bind(id).run()
   }
 
-  async upsertBySourceCard(
+  upsertBySourceCard(
     draft: QuestionDraft & { sourceCard: number },
-  ): Promise<{ created: boolean }> {
-    const row = await this.d1
+  ): { created: boolean } {
+    const row = this.sql
       .prepare('SELECT id FROM questions WHERE source_card = ?')
       .bind(draft.sourceCard)
       .first<{ id: number }>()
     if (row) {
-      await this.updateQuestion(row.id, draft)
+      this.updateQuestion(row.id, draft)
       return { created: false }
     }
-    await this.createQuestion(draft)
+    this.createQuestion(draft)
     return { created: true }
   }
 
-  async recordAnswerStat(
+  recordAnswerStat(
     questionId: number,
     outcome: 'correct' | 'wrong' | 'timeout',
-  ): Promise<void> {
-    await this.d1
+  ): void {
+    this.sql
       .prepare(
         `UPDATE questions SET times_asked = times_asked + 1,
            times_correct = times_correct + ?, times_timeout = times_timeout + ?
@@ -249,64 +216,64 @@ export class Db {
       .run()
   }
 
-  async resetQuestionStats(id?: number): Promise<void> {
+  resetQuestionStats(id?: number): void {
     const sql = 'UPDATE questions SET times_asked=0, times_correct=0, times_timeout=0'
-    if (id === undefined) await this.d1.prepare(sql).run()
-    else await this.d1.prepare(`${sql} WHERE id = ?`).bind(id).run()
+    if (id === undefined) this.sql.prepare(sql).run()
+    else this.sql.prepare(`${sql} WHERE id = ?`).bind(id).run()
   }
 
   // -- players --------------------------------------------------------------
 
-  async createPlayer(name: string): Promise<PlayerProfile> {
+  createPlayer(name: string): PlayerProfile {
     const ts = now()
     for (let attempt = 0; attempt < 50; attempt++) {
       const id = String(100000 + Math.floor(Math.random() * 900000))
-      const taken = await this.d1.prepare('SELECT 1 FROM players WHERE id = ?').bind(id).first()
+      const taken = this.sql.prepare('SELECT 1 FROM players WHERE id = ?').bind(id).first()
       if (taken) continue
-      await this.d1
+      this.sql
         .prepare('INSERT INTO players (id, name, created_at, last_seen) VALUES (?, ?, ?, ?)')
         .bind(id, name.trim().slice(0, 24), ts, ts)
         .run()
-      return (await this.getPlayer(id))!
+      return (this.getPlayer(id))!
     }
     throw new Error('Could not allocate a player ID')
   }
 
-  async getPlayer(id: string): Promise<PlayerProfile | null> {
-    const row = await this.d1
+  getPlayer(id: string): PlayerProfile | null {
+    const row = this.sql
       .prepare('SELECT * FROM players WHERE id = ?')
       .bind(id)
       .first<Record<string, unknown>>()
     return row ? toProfile(row) : null
   }
 
-  async touchPlayer(id: string): Promise<void> {
-    await this.d1.prepare('UPDATE players SET last_seen = ? WHERE id = ?').bind(now(), id).run()
+  touchPlayer(id: string): void {
+    this.sql.prepare('UPDATE players SET last_seen = ? WHERE id = ?').bind(now(), id).run()
   }
 
-  async renamePlayer(id: string, name: string): Promise<PlayerProfile | null> {
-    await this.d1
+  renamePlayer(id: string, name: string): PlayerProfile | null {
+    this.sql
       .prepare('UPDATE players SET name = ? WHERE id = ?')
       .bind(name.trim().slice(0, 24), id)
       .run()
     return this.getPlayer(id)
   }
 
-  async recordGameResults(rows: GameSummaryRow[]): Promise<void> {
+  recordGameResults(rows: GameSummaryRow[], transaction = true): void {
     if (rows.length === 0) return
     const ts = now()
-    const stmt = this.d1.prepare(
+    const stmt = this.sql.prepare(
       `UPDATE players SET total_score = total_score + ?, games_played = games_played + 1,
          wins = wins + ?, answered = answered + ?, correct = correct + ?, last_seen = ?
        WHERE id = ?`,
     )
-    await this.d1.batch(
-      rows.map((r) => stmt.bind(r.score, r.won ? 1 : 0, r.answered, r.correct, ts, r.playerId)),
-    )
+    const queries = rows.map((r) => stmt.bind(r.score, r.won ? 1 : 0, r.answered, r.correct, ts, r.playerId))
+    if (transaction) this.sql.batch(queries)
+    else for (const query of queries) query.run()
   }
 
-  async leaderboard(limit = 100): Promise<LeaderboardRow[]> {
-    const { results } = await this.d1
+  leaderboard(limit = 100): LeaderboardRow[] {
+    const { results } = this.sql
       .prepare(
         `SELECT * FROM players WHERE games_played > 0
          ORDER BY total_score DESC, wins DESC, correct DESC LIMIT ?`,

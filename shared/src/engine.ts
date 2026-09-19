@@ -3,8 +3,7 @@
  *
  * Nothing here touches sockets, timers, the database or the clock. Every function
  * takes a state and returns a new one. That keeps the rules exhaustively testable
- * without standing up a server, and it means porting the transport layer to
- * Cloudflare Durable Objects later leaves this file untouched.
+ * without standing up a server or depending on its transport layer.
  */
 
 import {
@@ -210,6 +209,7 @@ export function markAnswer(state: GameState, letter: AnswerLetter): GameState {
 }
 
 export interface ResolveAnswerInput {
+  difficulty?: import("./types.js").Difficulty
   /** null means the clock ran out. */
   chosen: AnswerLetter | null
   correctLetter: AnswerLetter
@@ -256,7 +256,7 @@ export function resolveAnswer(state: GameState, input: ResolveAnswerInput): Game
   const result: TurnResult = {
     seat,
     roll,
-    tier,
+    difficulty: input.difficulty ?? state.question?.difficulty ?? 'medium',
     questionId: input.questionId,
     questionText: input.questionText,
     options: input.options,

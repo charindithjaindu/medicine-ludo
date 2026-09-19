@@ -4,31 +4,26 @@ A stripped-down Ludo where movement is earned by answering medical questions.
 Players join a room with a 6-digit code, take turns rolling, and each roll draws a
 question. Two pieces each, not four.
 
-**The die face is the question tier.** Six tiers, six faces. Roll a 6 and you are
-offered six squares — and the highest-stakes card. Roll a 1 and it's one square.
-That single rule gives the game its risk and reward, with nothing extra to explain.
-
-**The room picks a difficulty.** Easy, Medium or Hard is chosen when the room is
-created, and every card that room draws carries that label. The tier still sets the
-distance and the points; the difficulty decides how hard the medicine is. So a table
-of first-years and a table of finalists play the same game on different questions.
-
----
+The die controls movement and points. Questions are drawn from a shuffled deck at
+the room's difficulty, independently of the roll. The current classroom setup is
+locked to Easy, matching the previously deployed app; `SINGLE_LEVEL` in
+`shared/src/types.ts` controls this setting.
 
 ## Running it
 
+Use Node 22.16 or newer (Node 24 recommended).
+
 ```bash
-npm install
-npm run dev            # Worker on :8787 (wrangler), client on :5173 (vite)
-npm run import:pdf     # seeds the 90 questions into the local D1
-npm run db:migrate     # only if your local D1 predates the difficulty column
+npm ci
+cp .env.example .env   # choose an admin password and a random session secret
+npm run import:pdf     # optional: seed a new database; requires pdftotext
+npm run dev           # Node on :8787, Vite on :5173
 ```
 
-Open http://localhost:5173. To deploy, see [DEPLOY.md](DEPLOY.md).
-
-`npm run import:pdf` needs `pdftotext` (`brew install poppler`). It is idempotent —
-rows are matched on the PDF card number, so re-running corrects the seeded cards
-and leaves their statistics alone. Add `--remote` to seed the deployed database.
+Open http://localhost:5173. Production: https://medicine-ludo.jaindu.me.
+See [DEPLOY.md](DEPLOY.md) for deployment, backups, recovery and load testing.
+`DATABASE_PATH` defaults to `data/medicine-ludo.sqlite`. PDF imports match card
+numbers, preserving accumulated statistics and existing difficulty labels.
 
 ### Playing without four humans
 
@@ -37,7 +32,7 @@ In the lobby, the host can drop a computer player into any empty seat — pick
 human and three AI if you like.
 
 They're deliberately simple; this is a multiplayer game first. Answering is a
-competence dial (a per-tier chance of being right, declining as cards get harder,
+competence dial (a per-difficulty chance of being right, declining as cards get harder,
 so a Consultant rarely misses an easy one and still fumbles the hardest). Piece
 choice is a short priority list: reach home > capture > home column > safe square,
 ties to the piece furthest along; going backward it retreats whichever piece can
@@ -108,7 +103,7 @@ Both pieces start **on the board**, on your start square. Waiting to roll a 6 ju
 to enter play is the least fun part of Ludo and adds nothing to a question game.
 
 **A turn.**
-1. Roll. The face picks the tier and the maximum distance.
+1. Roll. The face sets the movement distance and points.
 2. Answer within **60 seconds**. A timeout counts as wrong.
 3. Correct → move a piece **forward by the roll**. Wrong → move one **back
    `floor(roll/2)`**, never past your own start. If only one piece can make the
@@ -128,19 +123,18 @@ team, and partners can neither capture nor be captured by each other.
 > game the same length as a solo one.
 
 **Scoring** (feeds the leaderboard): 10/20/30/40/50/60 for a correct answer by
-tier, +25 per capture, +50 per piece home, +100 for the win. A wrong answer is
+roll, +25 per capture, +50 per piece home, +100 for the win. A wrong answer is
 worth 0 — never negative, so the leaderboard stays encouraging.
 
 ---
 
 ## Admin
 
-At **`/admin`**, behind `ADMIN_PASSWORD` (a Worker secret in production,
-`worker/.dev.vars` locally). Nothing in the player UI links
+At **`/admin`**, behind `ADMIN_PASSWORD` (configured in the server environment). Nothing in the player UI links
 there — players use `/`, admins type `/admin`. An unauthenticated visit shows a bare
 password box, and every `/api/admin/*` route returns 401 without a session.
 
-- Browse, search and filter the bank by tier, **difficulty**, state or text; create,
+- Browse, search and filter the bank by **difficulty**, state or text; create,
   edit, retire and delete questions.
 - Every question carries a **difficulty** — Easy, Medium or Hard — set on the edit
   form and honoured by the CSV/JSON import (`difficulty` column). It is what rooms
@@ -150,20 +144,15 @@ password box, and every `/api/admin/*` route returns 401 without a session.
 - **Retiring** is the default over deleting: it keeps a question's stats and pulls
   it from future games.
 - Per-question **asked / correct-rate / timeouts**, sortable worst-first. A 0%
-  card is probably wrong or ambiguous; a 100% card on a hard tier belongs lower.
+  card is probably wrong or ambiguous; a 100% card on a hard difficulty belongs lower.
 - Bulk CSV/JSON import with a **dry-run preview** before anything is written, plus
   export. An export re-imported updates the same rows, so it doubles as a backup.
-- Re-run the source PDF — locally only. It shells out to `pdftotext`, which Workers
-  cannot run, so the deployed button returns a message pointing at
-  `npm run import:pdf -- --remote`.
+- Re-run the source PDF from the CLI with `npm run import:pdf`, using `DATABASE_PATH`
+  to select the database. Install Poppler (`pdftotext`) first.
 
-**One invariant matters more than the rest: a tier can never reach zero active
-questions.** The die face *is* the tier, so an empty tier would be a roll the game
-cannot answer. Retire, delete and import all refuse the last active card in a tier.
-
-Filtering by difficulty cuts across that: an Easy room legitimately holds no tier-6
-cards, so a draw for a tier with no stock falls back to the nearest tier that has
-some. The roll still sets the distance and the points — only the card moves.
+Retire, delete and import refuse to remove the last active question from an
+available difficulty. Imports apply in a SQLite transaction, so rejected changes
+leave the bank unchanged.
 
 Decks are snapshotted when a game starts, so editing the bank mid-session cannot
 disturb a game already in progress.
@@ -174,9 +163,9 @@ disturb a game already in progress.
 
 ```
 shared/src/      types · board geometry · engine (pure rules) · ai · room-engine · protocol
-worker/src/      index (Worker) · room (Durable Object) · db (D1) · admin
+server/src/      index (Express) · rooms (WebSockets) · db (SQLite) · admin
 client/src/      screens/ (Play · Identity · Menu · Lobby · Game · Leaderboard · admin/)
-scripts/         import-pdf · parse-cards · playtest · cf-init
+scripts/         import-pdf · parse-cards · playtest
 ```
 
 Two layers of "no I/O here". `shared/src/engine.ts` holds the rules as pure
@@ -184,20 +173,19 @@ Two layers of "no I/O here". `shared/src/engine.ts` holds the rules as pure
 the lobby and the clocks but still never touches a socket or a database — it
 broadcasts through a callback and is handed anything it needs.
 
-That is what lets one turn loop run behind `wrangler dev` locally and inside a
-Durable Object in production, with no duplicated rules. `room-engine` is also the
+The same turn loop runs in tests and on the Ubuntu Node server. `room-engine` is also the
 only place that knows a question's answer before the reveal, which is why
 broadcasting the whole game state to the room is safe.
 
 ## Tests
 
 ```bash
-npm test                              # 34 engine tests: movement, capture, home, win
+npm test                              # rules, database, admin and restart recovery
 npm run playtest -- ffa quick 0.75    # 4 bots play a real game over sockets,
 npm run playtest -- teams standard    # then the leaderboard is checked against the result
 ```
 
-`REVEAL_MS` and `AI_DELAY_SCALE` can be set in `worker/.dev.vars` to speed a game
+`REVEAL_MS` and `AI_DELAY_SCALE` can be set in `.env` to speed a game
 up while testing; `AI_DELAY_SCALE=0.05` collapses the computer players' deliberate
 thinking pauses.
 

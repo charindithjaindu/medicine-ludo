@@ -44,7 +44,7 @@ function rolled(s: GameState, seat: number, roll: number): GameState {
   s.turnSeat = seat
   return applyRoll(s, seat, roll, {
     id: 1,
-    tier: roll as 1,
+    difficulty: 'easy',
     text: 'q',
     options: ['a', 'b', 'c', 'd'],
     deadline: 0,

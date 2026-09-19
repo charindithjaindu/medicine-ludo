@@ -6,7 +6,7 @@ import type { TurnResult } from './types.js'
 const resolved: TurnResult = {
   seat: 0,
   roll: 3,
-  tier: 3,
+  difficulty: 'medium',
   questionId: 42,
   questionText: 'q',
   options: ['a', 'b', 'c', 'd'],

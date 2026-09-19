@@ -4,13 +4,9 @@ import {
   DIFFICULTIES,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
-  TIER_NAMES,
-  TIERS,
-  difficultyForTier,
   type AnswerLetter,
   type Difficulty,
   type Question,
-  type Tier,
 } from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
 
@@ -23,9 +19,8 @@ export default function QuestionEditor({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [tier, setTier] = useState<Tier>(question?.tier ?? 1)
   const [difficulty, setDifficulty] = useState<Difficulty>(
-    question?.difficulty ?? difficultyForTier(question?.tier ?? 1),
+    question?.difficulty ?? 'easy',
   )
   const [text, setText] = useState(question?.text ?? '')
   const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', ''])
@@ -40,7 +35,6 @@ export default function QuestionEditor({
     setBusy(true)
     setError(null)
     const body = {
-      tier,
       difficulty,
       text,
       options,
@@ -106,29 +100,6 @@ export default function QuestionEditor({
         )}
 
         <div className="mt-4 space-y-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700">Tier (die face)</label>
-            <div className="mt-1 grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-              {TIERS.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTier(t)}
-                  className={`rounded-lg px-2 py-1.5 text-xs ring-1 transition ${
-                    tier === t
-                      ? 'bg-slate-900 text-white ring-slate-900'
-                      : 'bg-white ring-slate-200 hover:ring-slate-400'
-                  }`}
-                >
-                  <span className="block text-base font-bold">{t}</span>
-                  <span className={tier === t ? 'text-slate-300' : 'text-slate-500'}>
-                    {TIER_NAMES[t]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div>
             <label className="text-sm font-medium text-slate-700">
               Difficulty{' '}

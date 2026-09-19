@@ -1,4 +1,4 @@
--- D1 schema. Identical to the SQLite schema it replaced; D1 speaks SQLite.
+-- Persistent SQLite schema for the Node backend.
 
 CREATE TABLE IF NOT EXISTS players (
   id           TEXT PRIMARY KEY,
@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS players (
 
 CREATE TABLE IF NOT EXISTS questions (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  tier          INTEGER NOT NULL CHECK (tier BETWEEN 1 AND 6),
   -- How hard the medicine is, independent of the tier. A room is filtered by this:
   -- an Easy room only ever draws Easy cards.
   difficulty    TEXT    NOT NULL DEFAULT 'medium'
@@ -37,5 +36,4 @@ CREATE TABLE IF NOT EXISTS questions (
   updated_at    TEXT    NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_questions_tier_active ON questions(tier, active);
 CREATE INDEX IF NOT EXISTS idx_questions_difficulty_active ON questions(difficulty, active);

@@ -7,7 +7,7 @@
  * parser still validates everything it produces and reports problems rather than
  * quietly importing a card whose answer letter disagrees with its answer text.
  *
- * Used by `npm run import:pdf`, which turns the result into SQL for D1.
+ * Used by `npm run import:pdf`, which turns the result into SQL for SQLite.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -28,6 +28,7 @@ export const EXPECTED_CARDS = 90
 
 export interface ParsedCard extends QuestionDraft {
   sourceCard: number
+  tier: Tier
 }
 
 export interface ParseReport {

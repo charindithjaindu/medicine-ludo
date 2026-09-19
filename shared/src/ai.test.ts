@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createGame } from './engine.js'
 import { AI_ACCURACY, AI_SKILLS, chooseAnswer, choosePiece } from './ai.js'
-import type { GameState, Tier } from './types.js'
+import type { GameState, Difficulty } from './types.js'
 
 const PLAYERS = [
   { playerId: '1', name: 'Ana' },
@@ -22,17 +22,17 @@ const rng = () => 0
 
 describe('ai answering', () => {
   it('is right when it passes its accuracy check and wrong when it fails', () => {
-    expect(chooseAnswer('resident', 1, 'C', () => 0.1)).toBe('C')
-    expect(chooseAnswer('resident', 1, 'C', () => 0.999)).not.toBe('C')
+    expect(chooseAnswer('resident', 'easy', 'C', () => 0.1)).toBe('C')
+    expect(chooseAnswer('resident', 'easy', 'C', () => 0.999)).not.toBe('C')
   })
 
-  it('gets worse on harder tiers, and better at higher skill', () => {
+  it('gets worse on harder difficulties, and better at higher skill', () => {
     for (const skill of AI_SKILLS) {
-      const byTier = ([1, 2, 3, 4, 5, 6] as Tier[]).map((t) => AI_ACCURACY[skill][t])
+      const byTier = (['easy', 'medium', 'hard'] as Difficulty[]).map((t) => AI_ACCURACY[skill][t])
       for (let i = 1; i < byTier.length; i++) expect(byTier[i]).toBeLessThan(byTier[i - 1])
     }
-    expect(AI_ACCURACY.intern[3]).toBeLessThan(AI_ACCURACY.resident[3])
-    expect(AI_ACCURACY.resident[3]).toBeLessThan(AI_ACCURACY.consultant[3])
+    expect(AI_ACCURACY.intern['medium']).toBeLessThan(AI_ACCURACY.resident['medium'])
+    expect(AI_ACCURACY.resident['medium']).toBeLessThan(AI_ACCURACY.consultant['medium'])
   })
 })
 

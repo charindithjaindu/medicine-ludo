@@ -5,28 +5,32 @@
   "type": "module",
   "workspaces": [
     "client",
-    "worker"
+    "server"
   ],
   "scripts": {
     "predev": "npm run build -w client",
-    "dev": "concurrently -n worker,client -c cyan,magenta \"npm:dev:worker\" \"npm:dev:client\"",
-    "dev:worker": "npm run dev -w worker",
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "npm run dev -w client",
-    "build": "npm run build -w client",
-    "deploy": "npm run build -w client && npm run deploy -w worker",
-    "cf:init": "tsx scripts/cf-init.ts",
-    "db:migrate": "npm run db:migrate -w worker",
-    "db:migrate:remote": "npm run db:migrate:remote -w worker",
+    "build": "npm run build -w client && npm run build -w server",
     "test": "vitest run",
     "test:watch": "vitest",
     "import:pdf": "tsx scripts/import-pdf.ts",
     "playtest": "tsx scripts/playtest.ts",
-    "print:board": "tsx scripts/print-board.ts"
+    "print:board": "tsx scripts/print-board.ts",
+    "dev:server": "node --env-file-if-exists=.env --import tsx server/src/index.ts",
+    "start": "node --env-file-if-exists=.env server/dist/index.js",
+    "typecheck": "tsc --noEmit && tsc -p client/tsconfig.json && tsc -p server/tsconfig.json",
+    "loadtest": "tsx scripts/loadtest.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "vitest": "^3.0.5",
+    "esbuild": "^0.25.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
   }
 }

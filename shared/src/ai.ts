@@ -8,7 +8,7 @@
  */
 
 import { boardConfig, isSafeSquare, ringIndexOf } from './board.js'
-import type { AnswerLetter, GameState, Tier } from './types.js'
+import type { AnswerLetter, GameState, Difficulty } from './types.js'
 import { ANSWER_LETTERS } from './types.js'
 
 export const AI_SKILLS = ['intern', 'resident', 'consultant'] as const
@@ -27,10 +27,10 @@ export const AI_SKILL_BLURBS: Record<AiSkill, string> = {
 }
 
 /** Chance of answering correctly, by skill and tier. Everyone declines as it gets harder. */
-export const AI_ACCURACY: Record<AiSkill, Record<Tier, number>> = {
-  intern: { 1: 0.8, 2: 0.66, 3: 0.54, 4: 0.44, 5: 0.3, 6: 0.2 },
-  resident: { 1: 0.92, 2: 0.85, 3: 0.76, 4: 0.66, 5: 0.52, 6: 0.42 },
-  consultant: { 1: 0.98, 2: 0.95, 3: 0.9, 4: 0.84, 5: 0.74, 6: 0.64 },
+export const AI_ACCURACY: Record<AiSkill, Record<Difficulty, number>> = {
+  intern: { easy: 0.78, medium: 0.5, hard: 0.24 },
+  resident: { easy: 0.92, medium: 0.72, hard: 0.46 },
+  consultant: { easy: 0.98, medium: 0.88, hard: 0.68 },
 }
 
 export const AI_NAMES = ['Dr. Ada', 'Dr. Bodhi', 'Dr. Cruz', 'Dr. Okafor']
@@ -45,11 +45,11 @@ export const isAiId = (id: string) => id.startsWith(AI_ID_PREFIX)
 /** `correctLetter` is server-side knowledge and never leaves the server. */
 export function chooseAnswer(
   skill: AiSkill,
-  tier: Tier,
+  difficulty: Difficulty,
   correctLetter: AnswerLetter,
   rng: () => number = Math.random,
 ): AnswerLetter {
-  if (rng() < AI_ACCURACY[skill][tier]) return correctLetter
+  if (rng() < AI_ACCURACY[skill][difficulty]) return correctLetter
   const wrong = ANSWER_LETTERS.filter((l) => l !== correctLetter)
   return wrong[Math.floor(rng() * wrong.length)]
 }
@@ -62,8 +62,9 @@ export function chooseAnswer(
  * seconds, and an opponent who has already answered by then reads as a script
  * rather than a player.
  */
-export function thinkTimeMs(tier: Tier, rng: () => number = Math.random): number {
-  return 5000 + tier * 350 + rng() * 2800
+export function thinkTimeMs(difficulty: Difficulty, rng: () => number = Math.random): number {
+  const weight = difficulty === 'easy' ? 0 : difficulty === 'medium' ? 1 : 2
+  return 5000 + weight * 700 + rng() * 2800
 }
 
 /** Before rolling. Long enough that a computer's turn does not start mid-blink. */

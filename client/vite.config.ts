@@ -18,7 +18,7 @@ export default defineConfig({
     // Shared game code lives outside the client root, so Vite has to be allowed to serve it.
     fs: { allow: [path.resolve(here, '..')] },
     // In development the app is served by Vite for HMR, while the API and the
-    // websocket come from `wrangler dev` — the same Worker that runs in production.
+    // websocket come from the Node server — the same backend that runs in production.
     proxy: {
       '/api': { target: 'http://localhost:8787', changeOrigin: true },
       '/ws': { target: 'ws://localhost:8787', ws: true },

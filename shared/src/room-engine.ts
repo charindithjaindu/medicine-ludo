@@ -4,8 +4,7 @@
  * Transport-agnostic on purpose. It never touches a socket or a database — it
  * broadcasts through a callback and asks its host to fetch anything it needs
  * (a player profile, the question decks) before calling in. That is what lets the
- * same turn loop run behind a Node websocket server locally and inside a
- * Cloudflare Durable Object in production, with no duplicated rules.
+ * same turn loop run in tests and behind the Node WebSocket server.
  *
  * It is also the only place that knows a question's correct answer before the
  * reveal; that value never enters GameState, so broadcasting the whole state to
@@ -31,13 +30,11 @@ import {
   resolveAnswer,
   rollDie,
   summarise,
-  tierForRoll,
 } from './engine.js'
 import type { ServerMessage } from './protocol.js'
 import {
   ANSWER_SECONDS,
   DIFFICULTY_NAMES,
-  TIERS,
   type Ack,
   type AnswerLetter,
   type BoardPreset,
@@ -47,7 +44,6 @@ import {
   type GameSummaryRow,
   type Question,
   type RoomView,
-  type Tier,
   type Winner,
 } from './types.js'
 
@@ -105,42 +101,35 @@ function shuffle<T>(items: T[]): T[] {
   return out
 }
 
-/**
- * Six decks, drawn without replacement, snapshotted when the game starts.
- *
- * Filtering a room to one difficulty routinely leaves a tier empty — an Easy room
- * holds no Very Difficult cards — so a draw falls back to the nearest tier that does
- * have stock. The roll still sets the move and the points; only the card changes.
- */
+/** One shuffled question deck per difficulty, drawn without replacement. */
 class Deck {
-  private remaining: Record<Tier, Question[]>
-
-  constructor(private source: Record<Tier, Question[]>) {
-    this.remaining = Object.fromEntries(
-      TIERS.map((tier) => [tier, shuffle(source[tier] ?? [])]),
-    ) as Record<Tier, Question[]>
+  private remaining: Question[]
+  constructor(private source: Question[]) { this.remaining = shuffle(source) }
+  snapshot() { return { source: this.source, remaining: this.remaining } }
+  static restore(snapshot: { source: Question[]; remaining: Question[] }) {
+    const deck = new Deck(snapshot.source)
+    deck.remaining = snapshot.remaining
+    return deck
   }
-
-  hasAny(): boolean {
-    return TIERS.some((tier) => (this.source[tier]?.length ?? 0) > 0)
+  hasAny() { return this.source.length > 0 }
+  draw(): Question | null {
+    if (!this.remaining.length) this.remaining = shuffle(this.source)
+    return this.remaining.pop() ?? null
   }
+}
 
-  draw(tier: Tier): Question | null {
-    const from = this.nearestStocked(tier)
-    if (from === null) return null
-    if (!this.remaining[from].length) this.remaining[from] = shuffle(this.source[from])
-    return this.remaining[from].pop() ?? null
-  }
-
-  /** The tier asked for if it holds anything at all, otherwise the closest that does. */
-  private nearestStocked(tier: Tier): Tier | null {
-    let best: Tier | null = null
-    for (const candidate of TIERS) {
-      if (!this.source[candidate]?.length) continue
-      if (best === null || Math.abs(candidate - tier) < Math.abs(best - tier)) best = candidate
-    }
-    return best
-  }
+/** Private server state, including answer keys. Never send this to clients. */
+export interface RoomSnapshot {
+  version: 1
+  code: string
+  hostPlayerId: string
+  mode: GameMode
+  preset: BoardPreset
+  difficulty: Difficulty
+  seats: SeatEntry[]
+  game: GameState | null
+  deck: ReturnType<Deck['snapshot']> | null
+  pendingQuestion: Question | null
 }
 
 export class RoomEngine {
@@ -179,6 +168,44 @@ export class RoomEngine {
       connected: true,
       ai: null,
     })
+  }
+
+  snapshot(): RoomSnapshot {
+    return {
+      version: 1, code: this.code, hostPlayerId: this.hostPlayerId,
+      mode: this.mode, preset: this.preset, difficulty: this.difficulty,
+      seats: this.seats, game: this.game, deck: this.deck?.snapshot() ?? null,
+      pendingQuestion: this.pendingQuestion,
+    }
+  }
+
+  static restore(state: RoomSnapshot, hooks: RoomHooks, timings = DEFAULT_TIMINGS): RoomEngine {
+    if (state.version !== 1) throw new Error('Unsupported room snapshot')
+    const engine = new RoomEngine(state.code, { id: state.hostPlayerId, name: '' },
+      state.mode, state.preset, state.difficulty, hooks, timings)
+    engine.seats = state.seats.map(s => ({ ...s, connected: Boolean(s.ai) }))
+    engine.game = state.game
+    engine.deck = state.deck ? Deck.restore(state.deck) : null
+    engine.pendingQuestion = state.pendingQuestion
+    engine.syncConnectionFlags()
+    // Resume clocks once a human reconnects; downtime must not play an entire game.
+    return engine
+  }
+
+  resume() {
+    const game = this.game
+    if (!game) { this.armLobbyPrune(); return }
+    if (game.phase === 'game-over') return
+    if (game.phase === 'awaiting-roll') this.armRollTimer()
+    else if (game.phase === 'answering') {
+      if (game.chosenAnswer !== null) {
+        this.timer = setTimeout(() => this.resolveAnswerNow(game.chosenAnswer), this.timings.answerLockMs)
+      } else {
+        if (game.question) game.question.deadline = Date.now() + ANSWER_SECONDS * 1000
+        this.timer = setTimeout(() => this.performAnswer(null), ANSWER_SECONDS * 1000 + this.timings.answerGraceMs)
+      }
+    } else this.afterResolution()
+    this.emitGame()
   }
 
   // -------------------------------------------------------------------------
@@ -278,13 +305,13 @@ export class RoomEngine {
     return { ok: true }
   }
 
-  start(playerId: string, questionsByTier: Record<Tier, Question[]>): Ack {
+  start(playerId: string, questions: Question[]): Ack {
     const guard = this.hostGuard(playerId)
     if (guard) return guard
     const ready = this.canStart()
     if (!ready.ok) return ready
 
-    const deck = new Deck(questionsByTier)
+    const deck = new Deck(questions)
     if (!deck.hasAny()) {
       return {
         ok: false,
@@ -428,7 +455,7 @@ export class RoomEngine {
     this.clearTimer()
     const game = this.game!
     const roll = rollDie()
-    const question = this.deck!.draw(tierForRoll(roll))
+    const question = this.deck!.draw()
     if (!question) {
       this.game = endTurn({ ...game, phase: 'revealing', lastResult: null })
       this.emitGame()
@@ -440,7 +467,7 @@ export class RoomEngine {
     const deadline = Date.now() + ANSWER_SECONDS * 1000
     this.game = applyRoll(game, game.turnSeat, roll, {
       id: question.id,
-      tier: question.tier,
+      difficulty: question.difficulty,
       text: question.text,
       options: question.options,
       deadline,
@@ -490,6 +517,7 @@ export class RoomEngine {
       questionId: question.id,
       questionText: question.text,
       options: question.options,
+      difficulty: question.difficulty,
     })
     this.pendingQuestion = null
 
@@ -528,11 +556,11 @@ export class RoomEngine {
     this.clearTimer()
     if (!this.game) return
     this.game = endTurn(this.game)
-    this.emitGame()
 
     if (this.game.phase === 'game-over') {
       const summary = summarise(this.game)
       this.hooks.onFinished(summary, this.game.winner!)
+      this.emitGame()
       this.hooks.broadcast({
         t: 'event',
         event: 'gameOver',
@@ -540,6 +568,7 @@ export class RoomEngine {
       })
       return
     }
+    this.emitGame()
     this.armRollTimer()
   }
 
@@ -596,8 +625,8 @@ export class RoomEngine {
       // still in 'answering', and without it a computer would queue a second answer
       // during the pause before its first one resolves.
       const q = this.pendingQuestion
-      const letter = chooseAnswer(seat.ai, q.tier, q.answer)
-      run(() => this.performAnswer(letter), thinkTimeMs(q.tier))
+      const letter = chooseAnswer(seat.ai, q.difficulty, q.answer)
+      run(() => this.performAnswer(letter), thinkTimeMs(q.difficulty))
     } else if (game.phase === 'choosing-piece' && game.choices.length > 0) {
       const pick = aiChoosePiece(game, game.turnSeat, game.pendingDistance, game.choices)
       run(() => this.performChoice(pick), choiceDelayMs())

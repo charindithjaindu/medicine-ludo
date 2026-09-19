@@ -87,24 +87,15 @@ export default function Play() {
       rejoin.current = null
       clearRoomCode()
     }
-    const onConnect = () => {
-      // Socket.IO gives us a fresh socket id on reconnect, so re-announce ourselves.
-      if (rejoin.current) {
-        emit('joinRoom', rejoin.current)
-      }
-    }
-
     socket.on('room', onRoom)
     socket.on('game', onGame)
     socket.on('gameOver', onOver)
     socket.on('roomClosed', onClosed)
-    socket.on('connect', onConnect)
     return () => {
       socket.off('room', onRoom)
       socket.off('game', onGame)
       socket.off('gameOver', onOver)
       socket.off('roomClosed', onClosed)
-      socket.off('connect', onConnect)
     }
   }, [])
 

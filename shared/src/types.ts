@@ -44,6 +44,8 @@ export const ANSWER_SECONDS = 60
  */
 export type Difficulty = 'easy' | 'medium' | 'hard'
 
+export const SINGLE_LEVEL: Difficulty | null = 'easy'
+
 export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 
 export const DIFFICULTY_NAMES: Record<Difficulty, string> = {
@@ -92,7 +94,6 @@ export const ANSWER_LETTERS: AnswerLetter[] = ['A', 'B', 'C', 'D']
 
 export interface Question {
   id: number
-  tier: Tier
   difficulty: Difficulty
   /** 1-90 for cards seeded from the PDF, null for admin-authored questions. */
   sourceCard: number | null
@@ -108,8 +109,8 @@ export interface Question {
 
 /** A question as sent to players: no answer, no explanation. */
 export interface QuestionForPlay {
+  difficulty: Difficulty
   id: number
-  tier: Tier
   text: string
   options: [string, string, string, string]
   /** Epoch ms. The server enforces this; the client only renders the countdown. */
@@ -118,7 +119,6 @@ export interface QuestionForPlay {
 
 /** Draft shape used by the admin form and the bulk importer alike. */
 export interface QuestionDraft {
-  tier: Tier
   difficulty: Difficulty
   text: string
   options: [string, string, string, string]
@@ -194,7 +194,7 @@ export interface CaptureInfo {
 export interface TurnResult {
   seat: number
   roll: number
-  tier: Tier
+  difficulty: Difficulty
   questionId: number
   questionText: string
   options: [string, string, string, string]
