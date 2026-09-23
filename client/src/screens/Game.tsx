@@ -4,12 +4,14 @@ import {
   ANSWER_SECONDS,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
+  QUESTION_SHOW_DELAY_MS,
   TIER_POINTS,
   type AnswerLetter,
   type Difficulty,
+  type GameOverPayload,
   type GameState,
-  type GameSummaryRow,
   type PlayerProfile,
+  type ReviewItem,
   type RoomView,
   type Tier,
   type Winner,
@@ -20,18 +22,25 @@ import Board from '../components/Board.tsx'
 import Dice from '../components/Dice.tsx'
 import Confetti from '../components/Confetti.tsx'
 import { Backdrop, Button, Loader, Panel, Sheet, SoundToggle } from '../components/ui.tsx'
+import HowToPlay, { HowToPlayButton } from '../components/HowToPlay.tsx'
+import {
+  AnswerLine,
+  Explanation,
+  OutcomeIcon,
+  TopicTag,
+} from '../components/ProgressView.tsx'
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
+import { formatDuration } from '../lib/format.ts'
 
-/**
- * How long the die tumbles before its question appears.
+/*
+ * The die tumbles for QUESTION_SHOW_DELAY_MS before its question appears.
  *
  * The old 700ms was over before anyone had looked at it — and on a phone the
  * question sheet covered the die almost immediately, so the throw was never really
- * seen. Holding the question back costs a second and a half of a sixty-second
- * clock, which is worth it for a roll that looks thrown rather than computed.
+ * seen. The server starts the answer clock after the same delay, so the tumble
+ * costs the player nothing and their recorded time is theirs alone.
  */
-const DICE_ROLL_MS = 1500
 
 /**
  * True while a freshly-landed roll is still in the air — for everyone at the
@@ -57,7 +66,7 @@ function useRollAnimation(game: GameState): boolean {
     seen.current = rollId
     setAnimating(true)
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setAnimating(false), DICE_ROLL_MS)
+    timer.current = setTimeout(() => setAnimating(false), QUESTION_SHOW_DELAY_MS)
   }, [rollId])
 
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), [])
@@ -84,7 +93,7 @@ export default function Game({
   player: PlayerProfile
   room: RoomView
   game: GameState
-  over: { winner: Winner; summary: GameSummaryRow[] } | null
+  over: GameOverPayload | null
   onLeave: () => void
 }) {
   const mySeat = game.players.findIndex((p) => p.playerId === player.id)
@@ -94,6 +103,11 @@ export default function Game({
 
   const { burst, shower, flash } = useGameFeedback(game, over)
   const throwing = useRollAnimation(game)
+  const [rules, setRules] = useState(false)
+  // The answering player may close their own reveal early. It only hides the sheet
+  // on this screen; the server keeps everyone else's timing exactly as it was.
+  const [dismissedReveal, setDismissedReveal] = useState('')
+  const revealKey = game.lastResult ? answerBeat(game.lastResult) : ''
 
   return (
     <div className="relative min-h-full">
@@ -125,6 +139,7 @@ export default function Game({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <HowToPlayButton onClick={() => setRules(true)} />
             <SoundToggle />
             <Button variant="ghost" size="sm" onClick={onLeave}>
               Leave
@@ -194,13 +209,19 @@ export default function Game({
         </Sheet>
       )}
 
-      {game.phase === 'revealing' && game.lastResult && !over && (
+      {game.phase === 'revealing' && game.lastResult && !over && dismissedReveal !== revealKey && (
         <Sheet>
-          <RevealPanel game={game} />
+          <RevealPanel
+            game={game}
+            mySeat={mySeat}
+            onDismiss={() => setDismissedReveal(revealKey)}
+          />
         </Sheet>
       )}
 
       {over && <GameOverOverlay over={over} game={game} player={player} onLeave={onLeave} />}
+
+      {rules && <HowToPlay onClose={() => setRules(false)} />}
     </div>
   )
 }
@@ -610,7 +631,7 @@ function QuestionPanel({
   const [sent, setSent] = useState<AnswerLetter | null>(null)
   const locked = game.chosenAnswer ?? sent
   const seconds = Math.ceil(left / 1000)
-  const totalMs = ANSWER_SECONDS * 1000
+  const totalMs = ANSWER_SECONDS[q.difficulty] * 1000
   const urgent = seconds <= 5 && seconds > 0
 
   useEffect(() => setSent(null), [q.id])
@@ -631,13 +652,16 @@ function QuestionPanel({
             throw up where it left off and takes the impact. */}
         <Dice value={game.roll} land size={56} />
         <div className="min-w-0 flex-1">
-          <span
-            className={`inline-block rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-bold ${
-              TIER_COLORS[tier]
-            }`}
-          >
-            {DIFFICULTY_NAMES[q.difficulty]}
-          </span>
+          <div className="flex flex-wrap items-center gap-1">
+            <span
+              className={`inline-block rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-bold ${
+                TIER_COLORS[tier]
+              }`}
+            >
+              {DIFFICULTY_NAMES[q.difficulty]}
+            </span>
+            <TopicTag topic={q.topic} className="py-0.5" />
+          </div>
           <p className="mt-0.5 text-xs font-medium text-ink/60">
             {TIER_POINTS[tier]} pts · move {game.roll} ·{' '}
             {/* "deck", because the tier badge above is also named Easy…Very Difficult
@@ -712,8 +736,23 @@ function QuestionPanel({
   )
 }
 
-function RevealPanel({ game }: { game: GameState }) {
+/**
+ * The teaching moment. The correct answer and the explanation are the biggest
+ * things on the sheet — everyone at the table learns from every question, not just
+ * the player who answered it.
+ */
+function RevealPanel({
+  game,
+  mySeat,
+  onDismiss,
+}: {
+  game: GameState
+  mySeat: number
+  onDismiss: () => void
+}) {
   const r = game.lastResult!
+  const mine = r.seat === mySeat
+  const who = mine ? 'Your answer' : `${game.players[r.seat]?.name || 'Player'}'s answer`
   const moved =
     r.distance === 0
       ? 'No piece could move.'
@@ -722,28 +761,45 @@ function RevealPanel({ game }: { game: GameState }) {
         : `Moved back ${-r.distance}`
 
   return (
-    <div className={`p-5 ${r.wasCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+    <div className={`p-4 sm:p-5 ${r.wasCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
       <div className="flex items-center gap-3">
-        <Dice value={r.roll} size={56} />
-        <div>
+        <Dice value={r.roll} size={52} />
+        <div className="min-w-0 flex-1">
           <p className={`text-2xl font-bold ${r.wasCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>
             {r.chosen === null ? "⏱ Time's up" : r.wasCorrect ? 'Correct! 🎉' : 'Wrong ✗'}
           </p>
-          {r.pointsEarned > 0 && (
-            <p className="text-sm font-bold text-emerald-700">+{r.pointsEarned} points</p>
-          )}
+          <p className="flex flex-wrap items-center gap-x-2 text-sm">
+            <TopicTag topic={r.topic} />
+            {r.pointsEarned > 0 && (
+              <span className="font-bold text-emerald-700">+{r.pointsEarned} points</span>
+            )}
+          </p>
         </div>
       </div>
 
-      <p className="mt-3 text-sm leading-snug text-ink/70">{r.questionText}</p>
+      <p className="mt-3 leading-snug text-ink/80">{r.questionText}</p>
 
-      <div className="mt-2 flex items-start gap-2 rounded-xl border-[3px] border-ink bg-white px-3 py-2">
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 border-ink bg-emerald-300 font-mono text-sm font-bold">
-          {r.correctLetter}
-        </span>
-        <span className="font-medium">{r.options[ANSWER_LETTERS.indexOf(r.correctLetter)]}</span>
+      <div className="mt-3 space-y-2">
+        {!r.wasCorrect && (
+          <AnswerLine
+            tone="bad"
+            letter={r.chosen}
+            text={
+              r.chosen
+                ? r.options[ANSWER_LETTERS.indexOf(r.chosen)]
+                : 'No answer — the clock ran out'
+            }
+            caption={who}
+          />
+        )}
+        <AnswerLine
+          tone="good"
+          letter={r.correctLetter}
+          text={r.options[ANSWER_LETTERS.indexOf(r.correctLetter)]}
+          caption="Correct answer"
+        />
+        {r.explanation && <Explanation text={r.explanation} />}
       </div>
-      {r.explanation && <p className="mt-2 text-xs text-ink/60">{r.explanation}</p>}
 
       <ul className="mt-3 space-y-1 text-sm font-medium">
         <li>{moved}</li>
@@ -755,6 +811,12 @@ function RevealPanel({ game }: { game: GameState }) {
         {r.reachedHome && <li className="text-amber-600">★ A piece reached home!</li>}
         {r.extraTurn && <li className="text-emerald-700">🎲 Rolled a 6 — go again!</li>}
       </ul>
+
+      {mine && (
+        <Button variant="plain" size="md" className="mt-4 w-full" onClick={onDismiss}>
+          Got it
+        </Button>
+      )}
     </div>
   )
 }
@@ -782,7 +844,7 @@ function GameOverOverlay({
   player,
   onLeave,
 }: {
-  over: { winner: Winner; summary: GameSummaryRow[] }
+  over: GameOverPayload
   game: GameState
   player: PlayerProfile
   onLeave: () => void
@@ -796,6 +858,9 @@ function GameOverOverlay({
           .map((p) => p.name || 'Player')
           .join(' & ')
   const iWon = over.summary.find((r) => r.playerId === player.id)?.won
+  // The payload carries everyone's review; this screen is about you.
+  const review = (over.review ?? []).filter((item) => item.playerId === player.id)
+  const [tab, setTab] = useState<'results' | 'review'>('results')
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/80 p-4">
@@ -807,44 +872,151 @@ function GameOverOverlay({
         <h2 className="text-center text-4xl font-bold">{label} wins!</h2>
         {iWon && <p className="mt-1 text-center font-semibold text-emerald-600">That's you! 🎉</p>}
 
-        <div className="mt-5 space-y-2">
-          {over.summary.map((row, i) => (
-            <div
-              key={row.playerId}
-              className={`flex animate-rise-in items-center gap-3 rounded-xl border-[3px] border-ink px-3 py-2 ${
-                row.won ? 'bg-amber-200' : 'bg-white'
-              }`}
-              style={{ animationDelay: `${i * 90}ms` }}
-            >
-              <span className="w-5 text-center font-bold text-ink/40">{i + 1}</span>
-              <span
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-ink text-xs font-bold text-white"
-                style={{ backgroundColor: SEAT_COLORS[row.seat] }}
+        {review.length > 0 && (
+          <div
+            role="tablist"
+            className="mt-5 grid grid-cols-2 gap-1 rounded-xl border-[3px] border-ink bg-white p-1 text-sm font-semibold"
+          >
+            <TabChip active={tab === 'results'} onClick={() => setTab('results')}>
+              🏁 Results
+            </TabChip>
+            <TabChip active={tab === 'review'} onClick={() => setTab('review')}>
+              📖 Review ({review.length})
+            </TabChip>
+          </div>
+        )}
+
+        {tab === 'results' || review.length === 0 ? (
+          <div className="mt-5 space-y-2">
+            {over.summary.map((row, i) => (
+              <div
+                key={row.playerId}
+                className={`flex animate-rise-in items-center gap-3 rounded-xl border-[3px] border-ink px-3 py-2 ${
+                  row.won ? 'bg-amber-200' : 'bg-white'
+                }`}
+                style={{ animationDelay: `${i * 90}ms` }}
               >
-                {(row.name || '?').slice(0, 1).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1 truncate font-semibold">
-                {row.name || 'Player'}
-                {row.playerId === player.id && (
-                  <span className="ml-1 text-xs text-ink/45">(you)</span>
-                )}
-              </span>
-              <span className="text-xs text-ink/60">
-                {row.correct}/{row.answered} · {'★'.repeat(row.piecesHome) || '–'}
-              </span>
-              <span className="text-lg font-bold tabular-nums">{row.score}</span>
-            </div>
-          ))}
-        </div>
+                <span className="w-5 text-center font-bold text-ink/40">{i + 1}</span>
+                <span
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-ink text-xs font-bold text-white"
+                  style={{ backgroundColor: SEAT_COLORS[row.seat] }}
+                >
+                  {(row.name || '?').slice(0, 1).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-semibold">
+                  {row.name || 'Player'}
+                  {row.playerId === player.id && (
+                    <span className="ml-1 text-xs text-ink/45">(you)</span>
+                  )}
+                </span>
+                <span className="text-xs text-ink/60">
+                  {row.correct}/{row.answered} · {'★'.repeat(row.piecesHome) || '–'}
+                </span>
+                <span className="text-lg font-bold tabular-nums">{row.score}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <ReviewList items={review} />
+        )}
 
         <p className="mt-4 text-center text-xs text-ink/50">
-          Scores have been added to the global leaderboard.
+          Scores have been added to the global leaderboard. Your answers are saved to My
+          progress.
         </p>
 
         <Button variant="primary" size="lg" className="mt-4 w-full" onClick={onLeave}>
           Back to menu
         </Button>
       </Panel>
+    </div>
+  )
+}
+
+function TabChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={() => {
+        audio.play('click')
+        onClick()
+      }}
+      className={`rounded-lg px-3 py-2 transition ${
+        active ? 'bg-amber-300' : 'text-ink/60 hover:bg-amber-50'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+const OUTCOME_TEXT = {
+  correct: 'Correct',
+  wrong: 'Wrong',
+  timeout: 'Skipped (time ran out)',
+} as const
+
+/** Every question you answered this game, in the order you met them. */
+function ReviewList({ items }: { items: ReviewItem[] }) {
+  const right = items.filter((i) => i.outcome === 'correct').length
+  return (
+    <div className="mt-5">
+      <p className="mb-3 text-center text-sm font-medium text-ink/60">
+        You got {right} of {items.length} right.
+      </p>
+      <ol className="space-y-3">
+        {items.map((item, i) => (
+          <li
+            key={`${item.questionId}-${i}`}
+            className="rounded-xl border-[3px] border-ink bg-white p-3"
+          >
+            <div className="flex items-start gap-2">
+              <OutcomeIcon outcome={item.outcome} />
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink/55">
+                  <span className="font-bold text-ink/70">Q{i + 1}</span>
+                  <TopicTag topic={item.topic} />
+                  <span>
+                    {OUTCOME_TEXT[item.outcome]}
+                    {item.outcome !== 'timeout' && ` · ${formatDuration(item.timeMs)}`}
+                  </span>
+                </p>
+                <p className="mt-1 font-medium leading-snug">{item.questionText}</p>
+              </div>
+            </div>
+            <div className="mt-2 space-y-2">
+              {item.outcome !== 'correct' && (
+                <AnswerLine
+                  tone="bad"
+                  letter={item.chosen}
+                  text={
+                    item.chosen
+                      ? item.options[ANSWER_LETTERS.indexOf(item.chosen)]
+                      : 'No answer — the clock ran out'
+                  }
+                  caption="Your answer"
+                />
+              )}
+              <AnswerLine
+                tone="good"
+                letter={item.correctLetter}
+                text={item.options[ANSWER_LETTERS.indexOf(item.correctLetter)]}
+                caption={item.outcome === 'correct' ? 'Your answer — correct' : 'Correct answer'}
+              />
+              {item.explanation && <Explanation text={item.explanation} />}
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { Rooms } from './rooms.js'
 import { handleAdmin } from './admin.js'
 import { DEFAULT_TIMINGS } from '@shared/room-engine.js'
 import { SINGLE_LEVEL, isDifficulty } from '@shared/types.js'
+import { parseTopicList } from '@shared/validate.js'
 
 function timing(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -36,6 +37,13 @@ export function createApp(options: { databasePath?: string; adminPassword?: stri
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
   const loop = monitorEventLoopDelay({ resolution: 20 }); loop.enable()
   app.get('/api/health', (_req, res) => res.json({ ok: true, questions: db.activeCountByDifficulty() }))
+  // What a lobby can pick: topics with at least one active question at the room's
+  // difficulty. A locked level wins over the query, exactly as it does for rooms.
+  app.get('/api/topics', (req, res) => {
+    const asked = req.query.difficulty
+    const difficulty = SINGLE_LEVEL ?? (isDifficulty(asked) ? asked : undefined)
+    res.json(db.listTopics({ difficulty }))
+  })
   app.post('/api/players', (req, res) => {
     if (typeof req.body?.name !== 'string') return res.status(400).json({ error: 'Name is required' })
     res.status(201).json({ player: db.createPlayer(req.body.name) })
@@ -46,6 +54,12 @@ export function createApp(options: { databasePath?: string; adminPassword?: stri
     db.touchPlayer(player.id)
     res.json({ player })
   })
+  // The player ID is the only credential, exactly as for the profile above.
+  app.get('/api/players/:id/progress', (req, res) => {
+    const progress = db.playerProgress(req.params.id)
+    if (!progress) return res.status(404).json({ error: 'No player with that ID' })
+    res.json(progress)
+  })
   app.patch('/api/players/:id', (req, res) => {
     if (typeof req.body?.name !== 'string') return res.status(400).json({ error: 'Name is required' })
     const player = db.renamePlayer(req.params.id, req.body.name)
@@ -54,12 +68,13 @@ export function createApp(options: { databasePath?: string; adminPassword?: stri
   app.get('/api/leaderboard', (_req, res) => res.json({ rows: db.leaderboard() }))
   app.post('/api/rooms', (req, res) => {
     const { playerId, mode = 'ffa', preset = 'standard', difficulty = 'medium' } = req.body ?? {}
+    const topics = parseTopicList(req.body?.topics)
     if (typeof playerId !== 'string') return res.status(400).json({ error: 'Player ID is required' })
     const player = db.getPlayer(playerId)
     if (!player) return res.status(400).json({ error: 'Unknown player ID' })
-    if (!['ffa', 'teams'].includes(mode) || !['quick', 'standard'].includes(preset) || !isDifficulty(difficulty)) return res.status(400).json({ error: 'Invalid room settings' })
+    if (!['ffa', 'teams'].includes(mode) || !['quick', 'standard'].includes(preset) || !isDifficulty(difficulty) || !topics) return res.status(400).json({ error: 'Invalid room settings' })
     if (rooms.rooms.size >= 500) return res.status(503).json({ error: 'Room capacity reached. Please try again shortly.' })
-    res.json({ code: rooms.create(player, mode, preset, SINGLE_LEVEL ?? difficulty) })
+    res.json({ code: rooms.create(player, mode, preset, SINGLE_LEVEL ?? difficulty, topics) })
   })
   // Bound admin login attempts without restricting a classroom sharing one IP.
   const logins = new Map<string, { count: number; until: number }>()

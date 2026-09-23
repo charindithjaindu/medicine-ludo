@@ -10,6 +10,8 @@ import { AI_SKILLS, AI_SKILL_BLURBS, AI_SKILL_LABELS, type AiSkill } from '@shar
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
 import { Button, Loader, Panel, Screen, SoundToggle } from '../components/ui.tsx'
+import TopicPicker, { topicsSummary, useTopics } from '../components/TopicPicker.tsx'
+import HowToPlay, { HowToPlayButton } from '../components/HowToPlay.tsx'
 
 export default function Lobby({
   player,
@@ -23,9 +25,12 @@ export default function Lobby({
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [aiSkill, setAiSkill] = useState<AiSkill>('resident')
+  const [rules, setRules] = useState(false)
   const isHost = room.hostPlayerId === player.id
   const me = room.seats.find((s) => s.playerId === player.id)
   const canStart = room.mode === 'teams' ? room.seats.length === 4 : room.seats.length >= 2
+  // What the host can pick from at this room's difficulty.
+  const available = useTopics(room.difficulty)
 
   // A little chime whenever somebody new walks in.
   const seatCount = useRef(room.seats.length)
@@ -56,8 +61,13 @@ export default function Lobby({
         <Button variant="ghost" size="sm" onClick={onLeave}>
           ← Leave
         </Button>
-        <SoundToggle />
+        <div className="flex items-center gap-2">
+          <HowToPlayButton onClick={() => setRules(true)} />
+          <SoundToggle />
+        </div>
       </header>
+
+      {rules && <HowToPlay onClose={() => setRules(false)} />}
 
       <Panel className="mb-5 animate-pop-in p-5 text-center">
         <p className="text-sm font-semibold uppercase tracking-widest text-ink/50">Room code</p>
@@ -81,7 +91,32 @@ export default function Lobby({
           <span className="rounded-full border-2 border-ink bg-violet-200 px-3 py-1">
             {DIFFICULTY_EMOJI[room.difficulty]} {DIFFICULTY_NAMES[room.difficulty]} questions
           </span>
+          <span className="rounded-full border-2 border-ink bg-sky-200 px-3 py-1">
+            📚 {topicsSummary(room.topics)}
+          </span>
         </div>
+
+        {isHost && available && available.length > 1 && (
+          <div className="mt-4 border-t-2 border-ink/10 pt-3 text-left">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink/50">
+              Topics — you can change these until the game starts
+            </p>
+            <TopicPicker
+              topics={available}
+              value={room.topics}
+              onChange={(topics) =>
+                act(() =>
+                  emit('setMode', {
+                    mode: room.mode,
+                    preset: room.preset,
+                    difficulty: room.difficulty,
+                    topics,
+                  }),
+                )
+              }
+            />
+          </div>
+        )}
       </Panel>
 
       {isHost && room.seats.length < 4 && (

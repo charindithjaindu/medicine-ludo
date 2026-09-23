@@ -3,12 +3,16 @@ import {
   DIFFICULTIES,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
+  topicLabel,
+  type AdminQuestion,
   type Difficulty,
-  type Question,
+  type TopicCount,
 } from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
+import { formatDuration } from '../../lib/format.ts'
 import QuestionEditor from './QuestionEditor.tsx'
 import ImportExport from './ImportExport.tsx'
+import Players from './Players.tsx'
 
 /**
  * The admin panel. Reached only by typing /admin — nothing in the player UI links
@@ -73,33 +77,37 @@ function Login({ onIn }: { onIn: () => void }) {
   )
 }
 
-type SortKey = 'default' | 'rate' | 'asked'
+type SortKey = 'default' | 'rate' | 'asked' | 'slow'
 
 function Console({ onOut }: { onOut: () => void }) {
-  const [questions, setQuestions] = useState<Question[]>([])
+  const [questions, setQuestions] = useState<AdminQuestion[]>([])
+  const [topics, setTopics] = useState<TopicCount[]>([])
+  // null = every topic; '' = the uncategorised "General" questions.
+  const [topic, setTopic] = useState<string | null>(null)
   const [difficultyCounts, setDifficultyCounts] = useState<Record<Difficulty, number> | null>(null)
   const [difficulty, setDifficulty] = useState<Difficulty | ''>('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('default')
-  const [editing, setEditing] = useState<Question | 'new' | null>(null)
-  const [tab, setTab] = useState<'questions' | 'import'>('questions')
+  const [editing, setEditing] = useState<AdminQuestion | 'new' | null>(null)
+  const [tab, setTab] = useState<'questions' | 'players' | 'import'>('questions')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await adminApi.questions({ difficulty, active: activeFilter, search })
+      const r = await adminApi.questions({ difficulty, active: activeFilter, search, topic })
       setQuestions(r.questions)
       setDifficultyCounts(r.difficultyCounts)
+      setTopics(r.topics)
       setError(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [difficulty, activeFilter, search])
+  }, [difficulty, activeFilter, search, topic])
 
   useEffect(() => {
     const t = setTimeout(load, search ? 250 : 0)
@@ -116,6 +124,8 @@ function Console({ onOut }: { onOut: () => void }) {
       withRate.sort((a, z) => (a.rate ?? 2) - (z.rate ?? 2))
     } else if (sort === 'asked') {
       withRate.sort((a, z) => z.q.timesAsked - a.q.timesAsked)
+    } else if (sort === 'slow') {
+      withRate.sort((a, z) => (z.q.avgTimeMs ?? -1) - (a.q.avgTimeMs ?? -1))
     }
     return withRate
   }, [questions, sort])
@@ -139,6 +149,9 @@ function Console({ onOut }: { onOut: () => void }) {
             <TabButton active={tab === 'questions'} onClick={() => setTab('questions')}>
               Questions
             </TabButton>
+            <TabButton active={tab === 'players'} onClick={() => setTab('players')}>
+              Players
+            </TabButton>
             <TabButton active={tab === 'import'} onClick={() => setTab('import')}>
               Import / Export
             </TabButton>
@@ -154,7 +167,7 @@ function Console({ onOut }: { onOut: () => void }) {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 p-5">
-        {difficultyCounts && (
+        {difficultyCounts && tab !== 'players' && (
           <div className="grid grid-cols-3 gap-2">
             {DIFFICULTIES.map((d) => (
               <button
@@ -185,8 +198,10 @@ function Console({ onOut }: { onOut: () => void }) {
           </p>
         )}
 
-        {tab === 'import' ? (
-          <ImportExport onChanged={load} />
+        {tab === 'players' ? (
+          <Players />
+        ) : tab === 'import' ? (
+          <ImportExport onChanged={load} topics={topics} />
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
@@ -206,6 +221,18 @@ function Console({ onOut }: { onOut: () => void }) {
                 <option value="false">Retired only</option>
               </select>
               <select
+                value={topic === null ? 'all' : `t:${topic}`}
+                onChange={(e) => setTopic(e.target.value === 'all' ? null : e.target.value.slice(2))}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="all">All topics</option>
+                {topics.map((t) => (
+                  <option key={t.topic} value={`t:${t.topic}`}>
+                    {topicLabel(t.topic)} ({t.count})
+                  </option>
+                ))}
+              </select>
+              <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -213,6 +240,7 @@ function Console({ onOut }: { onOut: () => void }) {
                 <option value="default">Sort: card order</option>
                 <option value="rate">Sort: worst correct-rate first</option>
                 <option value="asked">Sort: most asked</option>
+                <option value="slow">Sort: slowest average answer</option>
               </select>
               <button
                 onClick={() => setEditing('new')}
@@ -222,30 +250,37 @@ function Console({ onOut }: { onOut: () => void }) {
               </button>
             </div>
 
-            <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2.5">Difficulty</th>
+                    <th className="px-3 py-2.5">Topic</th>
                     <th className="px-3 py-2.5">Question</th>
                     <th className="px-3 py-2.5 text-center">Ans</th>
                     <th className="px-3 py-2.5 text-center">Asked</th>
                     <th className="px-3 py-2.5 text-center">Correct</th>
                     <th className="px-3 py-2.5 text-center">Timeouts</th>
+                    <th
+                      className="px-3 py-2.5 text-center"
+                      title="Mean answer time from the answer log, timeouts excluded"
+                    >
+                      Avg time
+                    </th>
                     <th className="px-3 py-2.5"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                         Loading…
                       </td>
                     </tr>
                   )}
                   {!loading && rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                         No questions match.
                       </td>
                     </tr>
@@ -258,6 +293,15 @@ function Console({ onOut }: { onOut: () => void }) {
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800">
                           {DIFFICULTY_EMOJI[q.difficulty]} {DIFFICULTY_NAMES[q.difficulty]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                            q.topic ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {topicLabel(q.topic)}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
@@ -292,7 +336,28 @@ function Console({ onOut }: { onOut: () => void }) {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-center tabular-nums">{q.timesTimeout}</td>
+                      <td
+                        className="px-3 py-2.5 text-center tabular-nums"
+                        title={`${q.loggedTimeouts} timeout(s) in the answer log`}
+                      >
+                        {q.timesTimeout}
+                      </td>
+                      <td
+                        className="px-3 py-2.5 text-center whitespace-nowrap tabular-nums"
+                        title={`${q.loggedAnswers} logged attempt(s), ${q.loggedTimeouts} timed out`}
+                      >
+                        {q.avgTimeMs === null ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          formatDuration(q.avgTimeMs)
+                        )}
+                        {q.loggedAnswers > 0 && (
+                          <span className="block text-[0.7rem] text-slate-400">
+                            n={q.loggedAnswers}
+                            {q.loggedTimeouts > 0 && ` · ${q.loggedTimeouts} ⏱`}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 text-right whitespace-nowrap">
                         <button
                           onClick={() => act(() => adminApi.update(q.id, { active: !q.active }))}
@@ -320,7 +385,9 @@ function Console({ onOut }: { onOut: () => void }) {
             <p className="text-xs text-slate-500">
               A low correct-rate usually means the card is ambiguous or the answer is wrong. A
               correct-rate near 100% on a hard difficulty means it belongs in an easier one. Retiring
-              keeps a question's stats and pulls it out of future games.
+              keeps a question's stats and pulls it out of future games. Avg time comes from the
+              answer log (every attempt since v2) and leaves timeouts out; n is the number of
+              logged attempts and ⏱ how many of them ran out of time.
             </p>
           </>
         )}
@@ -329,6 +396,7 @@ function Console({ onOut }: { onOut: () => void }) {
       {editing && (
         <QuestionEditor
           question={editing === 'new' ? null : editing}
+          topics={topics}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)

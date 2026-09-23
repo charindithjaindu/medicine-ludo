@@ -30,7 +30,18 @@ export default function Leaderboard() {
         >
           ← Back
         </Link>
-        <SoundToggle />
+        <div className="flex items-center gap-2">
+          {me && (
+            <Link
+              to="/progress"
+              onClick={() => audio.play('click')}
+              className="rounded-full border-2 border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/25"
+            >
+              📈 My progress
+            </Link>
+          )}
+          <SoundToggle />
+        </div>
       </header>
 
       <h1 className="ml-title mb-1 text-center text-4xl font-bold">🏆 Leaderboard</h1>

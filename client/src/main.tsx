@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import './index.css'
 import Play from './screens/Play.tsx'
 import Leaderboard from './screens/Leaderboard.tsx'
+import Progress from './screens/Progress.tsx'
 import AdminApp from './screens/admin/AdminApp.tsx'
 
 createRoot(document.getElementById('root')!).render(
@@ -12,6 +13,7 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<Play />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/progress" element={<Progress />} />
         {/* Deliberately unlinked from the player UI. */}
         <Route path="/admin" element={<AdminApp />} />
         <Route path="*" element={<Play />} />

@@ -27,15 +27,6 @@ export const TIER_NAMES: Record<Tier, string> = {
 }
 
 /**
- * Seconds a player gets to answer, whatever the card.
- *
- * It used to scale with the tier, from 20s up to 45s, and the table could not keep
- * up — reading a clinical stem, weighing four options and tapping one is a minute's
- * work, so everyone gets a minute.
- */
-export const ANSWER_SECONDS = 60
-
-/**
  * How hard a question is, independent of its tier.
  *
  * The tier is a die face — it decides how far you move and how many points the card
@@ -53,6 +44,27 @@ export const DIFFICULTY_NAMES: Record<Difficulty, string> = {
   medium: 'Medium',
   hard: 'Hard',
 }
+
+/**
+ * Seconds a player gets to answer, by the room's difficulty.
+ *
+ * It used to scale with the tier, from 20s up to 45s, and the table could not keep
+ * up — reading a clinical stem, weighing four options and tapping one is a minute's
+ * work. Hard cards are longer stems, so the research team asked for half as much
+ * again.
+ */
+export const ANSWER_SECONDS: Record<Difficulty, number> = {
+  easy: 60,
+  medium: 60,
+  hard: 90,
+}
+
+/**
+ * How long the die tumbles on screen before its question appears. The server
+ * starts a player's answer time after it, so recorded response times measure
+ * the player rather than the animation.
+ */
+export const QUESTION_SHOW_DELAY_MS = 1500
 
 export const DIFFICULTY_EMOJI: Record<Difficulty, string> = {
   easy: '🌱',
@@ -92,9 +104,27 @@ export const WIN_POINTS = 100
 export type AnswerLetter = 'A' | 'B' | 'C' | 'D'
 export const ANSWER_LETTERS: AnswerLetter[] = ['A', 'B', 'C', 'D']
 
+/**
+ * Topics are free-text labels admins manage, not an enum. The empty string means
+ * uncategorised and is shown as this.
+ */
+export const GENERAL_TOPIC_NAME = 'General'
+export const TOPIC_MAX_LENGTH = 40
+
+export function topicLabel(topic: string): string {
+  return topic || GENERAL_TOPIC_NAME
+}
+
+export interface TopicCount {
+  topic: string
+  count: number
+}
+
 export interface Question {
   id: number
   difficulty: Difficulty
+  /** '' = uncategorised ("General"). */
+  topic: string
   /** 1-90 for cards seeded from the PDF, null for admin-authored questions. */
   sourceCard: number | null
   text: string
@@ -110,6 +140,7 @@ export interface Question {
 /** A question as sent to players: no answer, no explanation. */
 export interface QuestionForPlay {
   difficulty: Difficulty
+  topic: string
   id: number
   text: string
   options: [string, string, string, string]
@@ -120,6 +151,8 @@ export interface QuestionForPlay {
 /** Draft shape used by the admin form and the bulk importer alike. */
 export interface QuestionDraft {
   difficulty: Difficulty
+  /** Omitted = leave an existing question's topic alone ('' when creating). */
+  topic?: string
   text: string
   options: [string, string, string, string]
   answer: AnswerLetter
@@ -195,6 +228,7 @@ export interface TurnResult {
   seat: number
   roll: number
   difficulty: Difficulty
+  topic: string
   questionId: number
   questionText: string
   options: [string, string, string, string]
@@ -203,6 +237,11 @@ export interface TurnResult {
   correctLetter: AnswerLetter
   wasCorrect: boolean
   explanation: string | null
+  /**
+   * How long the player took, from the question appearing to their answer arriving;
+   * the full allowed time on a timeout.
+   */
+  timeMs: number
   /** Signed: positive on a correct answer, negative on a wrong one, 0 if nothing could move. */
   distance: number
   movedPieceId: string | null
@@ -269,6 +308,8 @@ export interface RoomView {
   preset: BoardPreset
   /** Every card drawn in this room carries this label. */
   difficulty: Difficulty
+  /** Topics the deck is drawn from; empty means every topic. */
+  topics: string[]
   seats: Seat[]
   started: boolean
 }
@@ -285,14 +326,21 @@ export interface Ack<T = undefined> {
 
 export interface ClientToServerEvents {
   createRoom: (
-    p: { playerId: string; mode: GameMode; preset: BoardPreset; difficulty: Difficulty },
+    p: {
+      playerId: string
+      mode: GameMode
+      preset: BoardPreset
+      difficulty: Difficulty
+      /** Omitted or empty = every topic. */
+      topics?: string[]
+    },
     ack: (r: Ack<{ code: string }>) => void,
   ) => void
   joinRoom: (p: { playerId: string; code: string }, ack: (r: Ack<{ code: string }>) => void) => void
   leaveRoom: (ack: (r: Ack) => void) => void
   setReady: (p: { ready: boolean }, ack: (r: Ack) => void) => void
   setMode: (
-    p: { mode: GameMode; preset: BoardPreset; difficulty?: Difficulty },
+    p: { mode: GameMode; preset: BoardPreset; difficulty?: Difficulty; topics?: string[] },
     ack: (r: Ack) => void,
   ) => void
   swapSeats: (p: { a: number; b: number }, ack: (r: Ack) => void) => void
@@ -307,7 +355,7 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   room: (room: RoomView) => void
   game: (state: GameState) => void
-  gameOver: (p: { winner: Winner; summary: GameSummaryRow[] }) => void
+  gameOver: (p: GameOverPayload) => void
   roomClosed: (p: { reason: string }) => void
 }
 
@@ -321,4 +369,130 @@ export interface GameSummaryRow {
   correct: number
   piecesHome: number
   won: boolean
+}
+
+/** One answered question, for the end-of-game review. Only exists after its reveal. */
+export interface ReviewItem {
+  seat: number
+  playerId: string
+  questionId: number
+  topic: string
+  difficulty: Difficulty
+  questionText: string
+  options: [string, string, string, string]
+  /** null means the clock ran out. */
+  chosen: AnswerLetter | null
+  correctLetter: AnswerLetter
+  outcome: AnswerOutcome
+  explanation: string | null
+  timeMs: number
+}
+
+export interface GameOverPayload {
+  winner: Winner
+  summary: GameSummaryRow[]
+  /** Every human player's answered questions, in play order. Filter by playerId. */
+  review: ReviewItem[]
+}
+
+// ---------------------------------------------------------------------------
+// Answer log and progress (research data)
+// ---------------------------------------------------------------------------
+
+export type AnswerOutcome = 'correct' | 'wrong' | 'timeout'
+
+/** One attempt at one question by a human player, as the room engine reports it. */
+export interface AnswerRecord {
+  playerId: string
+  questionId: number
+  topic: string
+  difficulty: Difficulty
+  roomCode: string
+  chosen: AnswerLetter | null
+  correctLetter: AnswerLetter
+  outcome: AnswerOutcome
+  timeMs: number
+  /** ISO timestamp. */
+  answeredAt: string
+}
+
+/**
+ * Accuracy counts a timeout as a miss, like the leaderboard does. The time figures
+ * only cover questions actually answered: a timeout's time is just the clock length.
+ */
+export interface AnswerStats {
+  answered: number
+  correct: number
+  wrong: number
+  timeouts: number
+  /** 0..1, correct / answered. 0 when nothing has been answered. */
+  accuracy: number
+  medianTimeMs: number | null
+  meanTimeMs: number | null
+}
+
+export interface TopicStats extends AnswerStats {
+  topic: string
+}
+
+export interface ProgressTrendPoint {
+  gameId: string
+  /** ISO timestamp of the first answer in that game. */
+  playedAt: string
+  topic: string
+  answered: number
+  correct: number
+}
+
+export interface ProgressMistake {
+  questionId: number
+  questionText: string
+  options: [string, string, string, string]
+  topic: string
+  difficulty: Difficulty
+  /** The player's most recent wrong choice; null if that attempt timed out. */
+  lastWrongChoice: AnswerLetter | null
+  lastWrongAt: string
+  correctLetter: AnswerLetter
+  explanation: string | null
+  timesSeen: number
+  /** Their latest attempt at this question was correct. */
+  nowCorrect: boolean
+}
+
+export interface ProgressAttempt {
+  questionId: number
+  questionText: string
+  topic: string
+  chosen: AnswerLetter | null
+  correctLetter: AnswerLetter
+  outcome: AnswerOutcome
+  timeMs: number
+  answeredAt: string
+}
+
+export interface PlayerProgress {
+  player: PlayerProfile
+  totals: AnswerStats
+  byTopic: TopicStats[]
+  trend: ProgressTrendPoint[]
+  mistakes: ProgressMistake[]
+  recent: ProgressAttempt[]
+}
+
+/** Admin "Players" tab. Answer figures come from the answer log. */
+export interface AdminPlayerRow extends AnswerStats {
+  id: string
+  name: string
+  gamesPlayed: number
+  totalScore: number
+  lastSeen: string
+}
+
+/** Admin question list row: the question plus timing from the answer log. */
+export interface AdminQuestion extends Question {
+  loggedAnswers: number
+  loggedTimeouts: number
+  /** Mean over non-timeout answers; null when there are none. */
+  avgTimeMs: number | null
 }

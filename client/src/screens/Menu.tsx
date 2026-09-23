@@ -13,6 +13,8 @@ import {
 import { emit } from '../lib/socket.ts'
 import { audio } from '../lib/audio.ts'
 import { Button, Logo, Panel, Screen, SoundToggle } from '../components/ui.tsx'
+import TopicPicker, { useTopics } from '../components/TopicPicker.tsx'
+import HowToPlay from '../components/HowToPlay.tsx'
 
 type View = 'home' | 'create' | 'join'
 
@@ -42,6 +44,9 @@ export default function Menu({
   const [mode, setMode] = useState<GameMode>('ffa')
   const [preset, setPreset] = useState<BoardPreset>('standard')
   const [difficulty, setDifficulty] = useState<Difficulty>(SINGLE_LEVEL ?? 'medium')
+  const [topics, setTopics] = useState<string[]>([])
+  const available = useTopics(difficulty)
+  const [rules, setRules] = useState(false)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +59,7 @@ export default function Menu({
       mode,
       preset,
       difficulty,
+      topics: available ? topics.filter((t) => available.some((a) => a.topic === t)) : [],
     })
     setBusy(false)
     if (!ack.ok) return setError(ack.error ?? 'Could not create a room')
@@ -138,8 +144,29 @@ export default function Menu({
           >
             🚪 Join a room
           </Button>
+          {/* Secondary on purpose: the two big buttons stay the whole decision. */}
+          <div className="grid animate-rise-in grid-cols-2 gap-2 pt-2 delay-3">
+            <Link
+              to="/progress"
+              onClick={() => audio.play('click')}
+              className="rounded-full border-2 border-white/25 bg-white/10 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-white/25"
+            >
+              📈 My progress
+            </Link>
+            <button
+              onClick={() => {
+                audio.play('click')
+                setRules(true)
+              }}
+              className="rounded-full border-2 border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/25"
+            >
+              ❓ How to play
+            </button>
+          </div>
         </div>
       )}
+
+      {rules && <HowToPlay onClose={() => setRules(false)} />}
 
       {view === 'create' && (
         <Panel className="animate-pop-in p-5">
@@ -205,6 +232,26 @@ export default function Menu({
           <p className="mb-5 text-xs text-ink/50">
             Every card in this room comes from this level. The die still decides how far you move.
           </p>
+
+          {/* One topic (or none yet) leaves nothing to choose between. */}
+          {available && available.length > 1 && (
+            <>
+              <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink/50">
+                Topics
+              </p>
+              <div className="mb-2">
+                <TopicPicker
+                  topics={available}
+                  value={topics.filter((t) => available.some((a) => a.topic === t))}
+                  onChange={setTopics}
+                />
+              </div>
+              <p className="mb-5 text-xs text-ink/50">
+                Pick one or more to focus on, or leave it on all. The number is how many cards
+                each has.
+              </p>
+            </>
+          )}
 
           {error && <ErrorNote>{error}</ErrorNote>}
 

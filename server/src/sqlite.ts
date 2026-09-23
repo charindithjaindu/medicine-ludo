@@ -23,6 +23,18 @@ export class Sqlite {
     this.raw.exec(`CREATE TABLE IF NOT EXISTS rooms (
       code TEXT PRIMARY KEY, snapshot TEXT NOT NULL, expires_at INTEGER NOT NULL
     ); CREATE TABLE IF NOT EXISTS completed_games (id TEXT PRIMARY KEY);`)
+    this.migrate()
+  }
+  /**
+   * In-place upgrades for databases created by an older schema.sql, which only ever
+   * runs CREATE ... IF NOT EXISTS. Each step checks before it alters, so running it
+   * on every start is safe, and it only adds columns: existing rows keep their data.
+   */
+  private migrate() {
+    const columns = this.raw.prepare('PRAGMA table_info(questions)').all() as Array<{ name: string }>
+    if (!columns.some(c => c.name === 'topic')) {
+      this.raw.exec("ALTER TABLE questions ADD COLUMN topic TEXT NOT NULL DEFAULT ''")
+    }
   }
   prepare(sql: string) { return new Query(this.raw, sql) }
   transaction<T>(fn: () => T): T {

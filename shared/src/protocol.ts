@@ -1,6 +1,6 @@
 /** WebSocket messages with request/response acknowledgements. */
 
-import type { GameState, GameSummaryRow, RoomView, Winner } from './types.js'
+import type { GameOverPayload, GameState, RoomView } from './types.js'
 
 /** client -> server */
 export interface CallMessage {
@@ -23,7 +23,7 @@ export interface AckMessage {
 export type ServerEvent =
   | { t: 'event'; event: 'room'; payload: RoomView }
   | { t: 'event'; event: 'game'; payload: GameState }
-  | { t: 'event'; event: 'gameOver'; payload: { winner: Winner; summary: GameSummaryRow[] } }
+  | { t: 'event'; event: 'gameOver'; payload: GameOverPayload }
   | { t: 'event'; event: 'roomClosed'; payload: { reason: string } }
 
 export type ServerMessage = AckMessage | ServerEvent

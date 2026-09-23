@@ -45,6 +45,7 @@ function rolled(s: GameState, seat: number, roll: number): GameState {
   return applyRoll(s, seat, roll, {
     id: 1,
     difficulty: 'easy',
+    topic: '',
     text: 'q',
     options: ['a', 'b', 'c', 'd'],
     deadline: 0,

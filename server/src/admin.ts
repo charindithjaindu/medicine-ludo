@@ -1,5 +1,5 @@
 import { DIFFICULTIES, isDifficulty, type Difficulty, type Question } from '@shared/types.js'
-import { validateQuestionDraft } from '@shared/validate.js'
+import { normaliseTopic, validateQuestionDraft } from '@shared/validate.js'
 import { parseCsvObjects, toCsv } from './csv.js'
 import type { Db } from './db.js'
 
@@ -70,6 +70,25 @@ function guardStock(db: Db, before: Record<Difficulty, number>): string | null {
   )
 }
 
+/** `?topic=` present (even empty, meaning General) filters; absent means all topics. */
+function topicParam(url: URL): string | undefined {
+  const topic = url.searchParams.get('topic')
+  return topic === null ? undefined : normaliseTopic(topic)
+}
+
+/**
+ * An export bound as an ISO string, undefined when absent, null when unreadable.
+ * A bare date is a whole UTC day, so `to=2026-10-01` includes all of the 1st.
+ */
+function timeBound(value: string | null, end: boolean): string | undefined | null {
+  if (value === null || value.trim() === '') return undefined
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
+  const parsed = new Date(dateOnly ? `${value.trim()}T00:00:00.000Z` : value)
+  if (Number.isNaN(parsed.getTime())) return null
+  if (dateOnly && end) parsed.setUTCDate(parsed.getUTCDate() + 1)
+  return parsed.toISOString()
+}
+
 export async function handleAdmin(
   request: Request,
   path: string,
@@ -116,8 +135,9 @@ export async function handleAdmin(
   if (path === '/questions' && request.method === 'GET') {
     const active = url.searchParams.get('active')
     const difficulty = url.searchParams.get('difficulty')
-    const questions = db.listQuestions({
+    const questions = db.listQuestionsWithTiming({
       difficulty: isDifficulty(difficulty) ? (difficulty as Difficulty) : undefined,
+      topic: topicParam(url),
       active: active === null || active === 'all' ? undefined : active === 'true',
       search: url.searchParams.get('search') ?? undefined,
     })
@@ -125,6 +145,8 @@ export async function handleAdmin(
       questions,
       counts: db.activeCountByDifficulty(),
       difficultyCounts: db.activeCountByDifficulty(),
+      // Every topic in the bank, retired questions included, for the filter.
+      topics: db.listTopics({ activeOnly: false }),
     })
   }
 
@@ -140,6 +162,7 @@ export async function handleAdmin(
       const rows = questions.map((q) => ({
         id: q.id,
         difficulty: q.difficulty,
+        topic: q.topic,
         source_card: q.sourceCard,
         text: q.text,
         option_a: q.options[0],
@@ -159,6 +182,40 @@ export async function handleAdmin(
     }
     return json({ questions }, 200, {
       'content-disposition': 'attachment; filename="medicine-ludo-questions.json"',
+    })
+  }
+
+  if (path === '/players' && request.method === 'GET') {
+    return json({ players: db.adminPlayers() })
+  }
+
+  const progressMatch = path.match(/^\/players\/([^/]+)\/progress$/)
+  if (progressMatch && request.method === 'GET') {
+    const progress = db.playerProgress(decodeURIComponent(progressMatch[1]))
+    return progress ? json(progress) : json({ error: 'No player with that ID' }, 404)
+  }
+
+  if (path === '/answers/export' && request.method === 'GET') {
+    const from = timeBound(url.searchParams.get('from'), false)
+    const to = timeBound(url.searchParams.get('to'), true)
+    if (from === null || to === null) {
+      return json({ error: 'from and to must be dates (YYYY-MM-DD) or ISO timestamps.' }, 400)
+    }
+    const rows = db.exportAnswers({ from, to, topic: topicParam(url) })
+    if (url.searchParams.get('format') === 'json') {
+      return json({ answers: rows }, 200, {
+        'content-disposition': 'attachment; filename="medicine-ludo-answers.json"',
+      })
+    }
+    const headers = [
+      'id', 'answered_at', 'game_id', 'room_code', 'player_id', 'player_name', 'question_id',
+      'topic', 'difficulty', 'question_text', 'chosen', 'correct_letter', 'outcome', 'time_ms',
+    ]
+    return new Response(toCsv(headers, rows as unknown as Array<Record<string, unknown>>), {
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': 'attachment; filename="medicine-ludo-answers.csv"',
+      },
     })
   }
 
@@ -199,6 +256,7 @@ export async function handleAdmin(
       const patch = (await request.json().catch(() => ({}))) as Record<string, unknown>
       const merged = {
         difficulty: patch.difficulty ?? existing.difficulty,
+        topic: patch.topic ?? existing.topic,
         text: patch.text ?? existing.text,
         options: patch.options ?? existing.options,
         answer: patch.answer ?? existing.answer,

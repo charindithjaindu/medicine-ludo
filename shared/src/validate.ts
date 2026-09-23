@@ -1,6 +1,8 @@
 import {
   ANSWER_LETTERS,
   DIFFICULTIES,
+  GENERAL_TOPIC_NAME,
+  TOPIC_MAX_LENGTH,
   type AnswerLetter,
   type Difficulty,
   type QuestionDraft,
@@ -42,6 +44,17 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
     errors.push(`Difficulty must be one of ${DIFFICULTIES.join(', ')}.`)
   }
 
+  // Optional so that importing an older export, which has no topic column, leaves
+  // existing topics alone instead of wiping them.
+  let topic: string | undefined
+  if (raw.topic !== undefined && raw.topic !== null) {
+    topic = typeof raw.topic === 'string' ? normaliseTopic(raw.topic) : undefined
+    if (topic === undefined) errors.push('Topic must be text.')
+    else if (topic.length > TOPIC_MAX_LENGTH) {
+      errors.push(`Topic must be at most ${TOPIC_MAX_LENGTH} characters.`)
+    }
+  }
+
   if (errors.length > 0) return { ok: false, errors }
 
   const explanationRaw = raw.explanation
@@ -59,6 +72,7 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
     errors: [],
     draft: {
       difficulty: difficulty!,
+      ...(topic !== undefined ? { topic } : {}),
       text,
       options: options as [string, string, string, string],
       answer: answer as AnswerLetter,
@@ -67,6 +81,32 @@ export function validateQuestionDraft(input: unknown): ValidationResult {
       sourceCard: Number.isFinite(sourceCard) ? sourceCard : null,
     },
   }
+}
+
+/**
+ * Trimmed, inner whitespace collapsed. "General" is what the UI calls the empty
+ * topic, so typing it must not create a second, separate General.
+ */
+export function normaliseTopic(value: string): string {
+  const topic = value.trim().replace(/\s+/g, ' ')
+  return topic.toLowerCase() === GENERAL_TOPIC_NAME.toLowerCase() ? '' : topic
+}
+
+/**
+ * A room's topic filter from untrusted input: an array of strings, normalised and
+ * de-duplicated. Returns null when the shape is wrong.
+ */
+export function parseTopicList(value: unknown): string[] | null {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > 50) return null
+  const out = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') return null
+    const topic = normaliseTopic(item)
+    if (topic.length > TOPIC_MAX_LENGTH) return null
+    out.add(topic)
+  }
+  return [...out]
 }
 
 /**

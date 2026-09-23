@@ -144,6 +144,7 @@ export async function emit<T = undefined>(
       mode: GameMode
       preset: BoardPreset
       difficulty: Difficulty
+      topics?: string[]
     }
     const res = await fetch('/api/rooms', {
       method: 'POST',

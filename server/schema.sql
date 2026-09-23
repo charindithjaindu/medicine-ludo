@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS questions (
   -- 1-90 for cards seeded from the PDF, NULL for admin-authored questions.
   -- UNIQUE is what makes re-importing the PDF an update rather than a duplicate.
   source_card   INTEGER UNIQUE,
+  -- Free-text label managed by admins; '' = uncategorised ("General"). Databases
+  -- created before topics get this column from the migration in sqlite.ts.
+  topic         TEXT    NOT NULL DEFAULT '',
   text          TEXT    NOT NULL,
   option_a      TEXT    NOT NULL,
   option_b      TEXT    NOT NULL,
@@ -37,3 +40,27 @@ CREATE TABLE IF NOT EXISTS questions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_difficulty_active ON questions(difficulty, active);
+
+-- One row per question answered by a human player: the research data. Computer
+-- players never write here. question_id is deliberately not a foreign key, so
+-- deleting a question keeps the attempts that were made at it; topic and difficulty
+-- are copied as they were when the question was asked.
+CREATE TABLE IF NOT EXISTS answer_log (
+  id             INTEGER PRIMARY KEY,
+  player_id      TEXT    NOT NULL,
+  question_id    INTEGER NOT NULL,
+  topic          TEXT    NOT NULL DEFAULT '',
+  difficulty     TEXT    NOT NULL,
+  room_code      TEXT    NOT NULL,
+  -- The room's UUID, so two games in the same room stay distinguishable.
+  game_id        TEXT    NOT NULL,
+  -- NULL when the clock ran out: the team's "skipped" question.
+  chosen         TEXT,
+  correct_letter TEXT    NOT NULL,
+  outcome        TEXT    NOT NULL CHECK (outcome IN ('correct','wrong','timeout')),
+  time_ms        INTEGER NOT NULL,
+  answered_at    TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_answer_log_player ON answer_log(player_id, answered_at);
+CREATE INDEX IF NOT EXISTS idx_answer_log_question ON answer_log(question_id);

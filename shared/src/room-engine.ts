@@ -35,14 +35,20 @@ import type { ServerMessage } from './protocol.js'
 import {
   ANSWER_SECONDS,
   DIFFICULTY_NAMES,
+  QUESTION_SHOW_DELAY_MS,
+  topicLabel,
   type Ack,
   type AnswerLetter,
+  type AnswerOutcome,
+  type AnswerRecord,
   type BoardPreset,
   type Difficulty,
   type GameMode,
+  type GameOverPayload,
   type GameState,
   type GameSummaryRow,
   type Question,
+  type ReviewItem,
   type RoomView,
   type Winner,
 } from './types.js'
@@ -74,7 +80,9 @@ export const DEFAULT_TIMINGS: RoomTimings = {
 export interface RoomHooks {
   broadcast(message: ServerMessage): void
   /** Per-question statistics, for the admin panel. Fire and forget. */
-  onStat(questionId: number, outcome: 'correct' | 'wrong' | 'timeout'): void
+  onStat(questionId: number, outcome: AnswerOutcome): void
+  /** One row of research data per human answer. Never called for computer players. */
+  onAnswer(record: AnswerRecord): void
   /** Final results, for the leaderboard. AI seats are already filtered out. */
   onFinished(summary: GameSummaryRow[], winner: Winner): void
 }
@@ -118,7 +126,10 @@ class Deck {
   }
 }
 
-/** Private server state, including answer keys. Never send this to clients. */
+/**
+ * Private server state, including answer keys. Never send this to clients.
+ * Fields marked optional were added later; snapshots saved before them still load.
+ */
 export interface RoomSnapshot {
   version: 1
   code: string
@@ -126,11 +137,20 @@ export interface RoomSnapshot {
   mode: GameMode
   preset: BoardPreset
   difficulty: Difficulty
+  topics?: string[]
   seats: SeatEntry[]
   game: GameState | null
   deck: ReturnType<Deck['snapshot']> | null
   pendingQuestion: Question | null
+  /** Epoch ms the pending question appeared on screen. */
+  pendingAskedAt?: number | null
+  /** Epoch ms the locked-in answer arrived, while it waits to resolve. */
+  pendingAnsweredAt?: number | null
+  review?: ReviewItem[]
 }
+
+const isHuman = (seat: SeatEntry | undefined) =>
+  !!seat && !seat.ai && !seat.playerId.startsWith(AI_ID_PREFIX)
 
 export class RoomEngine {
   readonly code: string
@@ -138,10 +158,14 @@ export class RoomEngine {
   mode: GameMode
   preset: BoardPreset
   difficulty: Difficulty
+  topics: string[]
   private seats: SeatEntry[] = []
   game: GameState | null = null
   private deck: Deck | null = null
   private pendingQuestion: Question | null = null
+  private pendingAskedAt: number | null = null
+  private pendingAnsweredAt: number | null = null
+  private review: ReviewItem[] = []
   private timer: ReturnType<typeof setTimeout> | null = null
   private aiTimer: ReturnType<typeof setTimeout> | null = null
   private lobbyTimer: ReturnType<typeof setTimeout> | null = null
@@ -153,6 +177,7 @@ export class RoomEngine {
     mode: GameMode,
     preset: BoardPreset,
     difficulty: Difficulty,
+    topics: string[],
     private hooks: RoomHooks,
     private timings: RoomTimings = DEFAULT_TIMINGS,
   ) {
@@ -161,6 +186,7 @@ export class RoomEngine {
     this.mode = mode
     this.preset = preset
     this.difficulty = difficulty
+    this.topics = topics
     this.seats.push({
       playerId: host.id,
       name: host.name || 'Player',
@@ -173,20 +199,24 @@ export class RoomEngine {
   snapshot(): RoomSnapshot {
     return {
       version: 1, code: this.code, hostPlayerId: this.hostPlayerId,
-      mode: this.mode, preset: this.preset, difficulty: this.difficulty,
+      mode: this.mode, preset: this.preset, difficulty: this.difficulty, topics: this.topics,
       seats: this.seats, game: this.game, deck: this.deck?.snapshot() ?? null,
-      pendingQuestion: this.pendingQuestion,
+      pendingQuestion: this.pendingQuestion, pendingAskedAt: this.pendingAskedAt,
+      pendingAnsweredAt: this.pendingAnsweredAt, review: this.review,
     }
   }
 
   static restore(state: RoomSnapshot, hooks: RoomHooks, timings = DEFAULT_TIMINGS): RoomEngine {
     if (state.version !== 1) throw new Error('Unsupported room snapshot')
     const engine = new RoomEngine(state.code, { id: state.hostPlayerId, name: '' },
-      state.mode, state.preset, state.difficulty, hooks, timings)
+      state.mode, state.preset, state.difficulty, state.topics ?? [], hooks, timings)
     engine.seats = state.seats.map(s => ({ ...s, connected: Boolean(s.ai) }))
     engine.game = state.game
     engine.deck = state.deck ? Deck.restore(state.deck) : null
     engine.pendingQuestion = state.pendingQuestion
+    engine.pendingAskedAt = state.pendingAskedAt ?? null
+    engine.pendingAnsweredAt = state.pendingAnsweredAt ?? null
+    engine.review = state.review ?? []
     engine.syncConnectionFlags()
     // Resume clocks once a human reconnects; downtime must not play an entire game.
     return engine
@@ -201,8 +231,11 @@ export class RoomEngine {
       if (game.chosenAnswer !== null) {
         this.timer = setTimeout(() => this.resolveAnswerNow(game.chosenAnswer), this.timings.answerLockMs)
       } else {
-        if (game.question) game.question.deadline = Date.now() + ANSWER_SECONDS * 1000
-        this.timer = setTimeout(() => this.performAnswer(null), ANSWER_SECONDS * 1000 + this.timings.answerGraceMs)
+        // The clock restarts, so the measured answer time restarts with it.
+        const allowedMs = this.allowedMs()
+        if (game.question) game.question.deadline = Date.now() + allowedMs
+        this.pendingAskedAt = Date.now() + QUESTION_SHOW_DELAY_MS
+        this.timer = setTimeout(() => this.performAnswer(null), allowedMs + this.timings.answerGraceMs)
       }
     } else this.afterResolution()
     this.emitGame()
@@ -245,12 +278,19 @@ export class RoomEngine {
     return { ok: true }
   }
 
-  setMode(playerId: string, mode: GameMode, preset: BoardPreset, difficulty?: Difficulty): Ack {
+  setMode(
+    playerId: string,
+    mode: GameMode,
+    preset: BoardPreset,
+    difficulty?: Difficulty,
+    topics?: string[],
+  ): Ack {
     const guard = this.hostGuard(playerId)
     if (guard) return guard
     this.mode = mode
     this.preset = preset
     if (difficulty) this.difficulty = difficulty
+    if (topics) this.topics = topics
     this.emitRoom()
     return { ok: true }
   }
@@ -305,23 +345,31 @@ export class RoomEngine {
     return { ok: true }
   }
 
+  /** `questions` are the active questions at this room's difficulty; topics filter here. */
   start(playerId: string, questions: Question[]): Ack {
     const guard = this.hostGuard(playerId)
     if (guard) return guard
     const ready = this.canStart()
     if (!ready.ok) return ready
 
-    const deck = new Deck(questions)
+    const topics = this.topics
+    const deck = new Deck(
+      topics.length ? questions.filter((q) => topics.includes(q.topic ?? '')) : questions,
+    )
     if (!deck.hasAny()) {
+      const level = DIFFICULTY_NAMES[this.difficulty]
       return {
         ok: false,
-        error:
-          `There are no active ${DIFFICULTY_NAMES[this.difficulty]} questions. ` +
-          'Pick another difficulty, or ask an admin to add some.',
+        error: topics.length
+          ? `There are no active ${level} questions in ${topics.map(topicLabel).join(', ')}. ` +
+            'Pick other topics, or ask an admin to add some.'
+          : `There are no active ${level} questions. ` +
+            'Pick another difficulty, or ask an admin to add some.',
       }
     }
 
     this.deck = deck
+    this.review = []
     this.game = createGame({
       mode: this.mode,
       preset: this.preset,
@@ -464,10 +512,15 @@ export class RoomEngine {
     }
 
     this.pendingQuestion = question
-    const deadline = Date.now() + ANSWER_SECONDS * 1000
+    const now = Date.now()
+    const deadline = now + ANSWER_SECONDS[question.difficulty] * 1000
+    // The client holds the question back while the die tumbles; time starts after.
+    this.pendingAskedAt = now + QUESTION_SHOW_DELAY_MS
+    this.pendingAnsweredAt = null
     this.game = applyRoll(game, game.turnSeat, roll, {
       id: question.id,
       difficulty: question.difficulty,
+      topic: question.topic ?? '',
       text: question.text,
       options: question.options,
       deadline,
@@ -496,6 +549,8 @@ export class RoomEngine {
     if (!game || !this.pendingQuestion) return
 
     if (letter !== null && game.phase === 'answering' && game.chosenAnswer === null) {
+      // Stop the player's clock now: the lock-in pause is ours, not theirs.
+      this.pendingAnsweredAt = Date.now()
       this.game = markAnswer(game, letter)
       this.emitGame()
       this.timer = setTimeout(() => this.resolveAnswerNow(letter), this.timings.answerLockMs)
@@ -510,6 +565,13 @@ export class RoomEngine {
     const question = this.pendingQuestion
     if (!game || !question) return
 
+    const topic = question.topic ?? ''
+    const outcome: AnswerOutcome =
+      letter === null ? 'timeout' : letter === question.answer ? 'correct' : 'wrong'
+    const timeMs = this.answerTimeMs(letter)
+    const seat = game.turnSeat
+    const player = this.seats[seat]
+
     this.game = resolveAnswer(game, {
       chosen: letter,
       correctLetter: question.answer,
@@ -518,15 +580,66 @@ export class RoomEngine {
       questionText: question.text,
       options: question.options,
       difficulty: question.difficulty,
+      topic,
+      timeMs,
     })
     this.pendingQuestion = null
+    this.pendingAskedAt = null
+    this.pendingAnsweredAt = null
 
-    this.hooks.onStat(
-      question.id,
-      letter === null ? 'timeout' : letter === question.answer ? 'correct' : 'wrong',
-    )
+    this.hooks.onStat(question.id, outcome)
+    if (isHuman(player)) {
+      this.hooks.onAnswer({
+        playerId: player.playerId,
+        questionId: question.id,
+        topic,
+        difficulty: question.difficulty,
+        roomCode: this.code,
+        chosen: letter,
+        correctLetter: question.answer,
+        outcome,
+        timeMs,
+        answeredAt: new Date().toISOString(),
+      })
+      this.review.push({
+        seat,
+        playerId: player.playerId,
+        questionId: question.id,
+        topic,
+        difficulty: question.difficulty,
+        questionText: question.text,
+        options: question.options,
+        chosen: letter,
+        correctLetter: question.answer,
+        outcome,
+        explanation: question.explanation,
+        timeMs,
+      })
+    }
     this.emitGame()
     this.afterResolution()
+  }
+
+  /** The pending question's clock length. */
+  private allowedMs(): number {
+    const difficulty = this.pendingQuestion?.difficulty ?? this.difficulty
+    return ANSWER_SECONDS[difficulty] * 1000
+  }
+
+  /**
+   * From the question appearing to the answer arriving, within 0..allowed. A timeout
+   * is the whole allowance. Snapshots from before askedAt existed fall back to the
+   * deadline, which was set from the same moment.
+   */
+  private answerTimeMs(letter: AnswerLetter | null): number {
+    const allowed = this.allowedMs()
+    if (letter === null) return allowed
+    const deadline = this.game?.question?.deadline
+    const askedAt =
+      this.pendingAskedAt ??
+      (deadline ? deadline - allowed + QUESTION_SHOW_DELAY_MS : Date.now())
+    const answeredAt = this.pendingAnsweredAt ?? Date.now()
+    return Math.min(allowed, Math.max(0, Math.round(answeredAt - askedAt)))
   }
 
   private performChoice(pieceId: string) {
@@ -558,18 +671,21 @@ export class RoomEngine {
     this.game = endTurn(this.game)
 
     if (this.game.phase === 'game-over') {
-      const summary = summarise(this.game)
-      this.hooks.onFinished(summary, this.game.winner!)
+      const payload = this.gameOverPayload()!
+      this.hooks.onFinished(payload.summary, payload.winner)
       this.emitGame()
-      this.hooks.broadcast({
-        t: 'event',
-        event: 'gameOver',
-        payload: { winner: this.game.winner!, summary },
-      })
+      this.hooks.broadcast({ t: 'event', event: 'gameOver', payload })
       return
     }
     this.emitGame()
     this.armRollTimer()
+  }
+
+  /** Results plus the review, once the game is over. Answers in it were all revealed. */
+  gameOverPayload(): GameOverPayload | null {
+    const game = this.game
+    if (!game || game.phase !== 'game-over' || !game.winner) return null
+    return { winner: game.winner, summary: summarise(game), review: this.review }
   }
 
   private armRollTimer() {
@@ -662,6 +778,7 @@ export class RoomEngine {
       mode: this.mode,
       preset: this.preset,
       difficulty: this.difficulty,
+      topics: this.topics,
       started: this.game !== null,
       seats: this.seats.map((s, seat) => ({
         seat,

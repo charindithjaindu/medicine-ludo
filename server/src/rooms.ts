@@ -1,10 +1,10 @@
 import { randomInt, randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import { RoomEngine, DEFAULT_TIMINGS, type RoomSnapshot, type RoomTimings } from '@shared/room-engine.js'
-import { summarise } from '@shared/engine.js'
 import { AI_SKILLS, isAiId } from '@shared/ai.js'
 import { isCall, type ServerMessage } from '@shared/protocol.js'
-import { SINGLE_LEVEL, isDifficulty, type AnswerLetter, type BoardPreset, type GameMode, type PlayerProfile, type Difficulty } from '@shared/types.js'
+import { SINGLE_LEVEL, isDifficulty, type AnswerLetter, type AnswerOutcome, type AnswerRecord, type BoardPreset, type GameMode, type PlayerProfile, type Difficulty } from '@shared/types.js'
+import { parseTopicList } from '@shared/validate.js'
 import type { Db } from './db.js'
 
 interface Room {
@@ -42,7 +42,10 @@ export class Rooms {
         const text = JSON.stringify(message)
         for (const ws of room.sockets.keys()) this.send(ws, text)
       },
-      onStat: (id: number, outcome: 'correct' | 'wrong' | 'timeout') => this.db.recordAnswerStat(id, outcome),
+      onStat: (id: number, outcome: AnswerOutcome) => this.db.recordAnswerStat(id, outcome),
+      // The engine already skips computer players; the ID check is a second lock on
+      // the research data.
+      onAnswer: (record: AnswerRecord) => { if (!isAiId(record.playerId)) this.db.recordAnswer(record, room.id) },
       onFinished: (rows: Parameters<Db['recordGameResults']>[0]) => {
         // A recovered game can never award its scores twice.
         this.db.sql.transaction(() => {
@@ -58,12 +61,12 @@ export class Rooms {
     this.db.sql.prepare('INSERT OR REPLACE INTO rooms(code,snapshot,expires_at) VALUES (?,?,?)')
       .bind(room.engine.code, JSON.stringify({ id: room.id, engine: room.engine.snapshot() }), Date.now() + 6 * 3600_000).run()
   }
-  create(profile: PlayerProfile, mode: GameMode, preset: BoardPreset, difficulty: Difficulty) {
+  create(profile: PlayerProfile, mode: GameMode, preset: BoardPreset, difficulty: Difficulty, topics: string[] = []) {
     if (this.rooms.size >= 500) throw new Error('Room capacity reached. Please try again shortly.')
     let code: string
     do { code = String(randomInt(100000, 1000000)) } while (this.rooms.has(code))
     const room = this.makeRoom(code)
-    room.engine = new RoomEngine(code, profile, mode, preset, difficulty, this.hooks(room), this.timings)
+    room.engine = new RoomEngine(code, profile, mode, preset, difficulty, topics, this.hooks(room), this.timings)
     this.rooms.set(code, room)
     this.save(room)
     return code
@@ -82,11 +85,8 @@ export class Rooms {
     this.db.touchPlayer(playerId)
     this.send(ws, JSON.stringify({ t: 'event', event: 'room', payload: room.engine.view() }))
     if (room.engine.game) this.send(ws, JSON.stringify({ t: 'event', event: 'game', payload: room.engine.game }))
-    if (room.engine.game?.phase === 'game-over' && room.engine.game.winner) {
-      this.send(ws, JSON.stringify({ t: 'event', event: 'gameOver', payload: {
-        winner: room.engine.game.winner, summary: summarise(room.engine.game),
-      } }))
-    }
+    const over = room.engine.gameOverPayload()
+    if (over) this.send(ws, JSON.stringify({ t: 'event', event: 'gameOver', payload: over }))
     let windowStart = Date.now(), messages = 0
     ws.on('message', raw => {
       if (Date.now() - windowStart > 1000) { windowStart = Date.now(); messages = 0 }
@@ -99,9 +99,12 @@ export class Rooms {
         let ack
         switch (message.event) {
           case 'setReady': ack = engine.setReady(playerId, p.ready === true); break
-          case 'setMode':
-            ack = (p.mode === 'ffa' || p.mode === 'teams') && (p.preset === 'quick' || p.preset === 'standard') && isDifficulty(p.difficulty)
-              ? engine.setMode(playerId, p.mode, p.preset, SINGLE_LEVEL ?? p.difficulty) : { ok: false, error: 'Invalid room settings' }; break
+          case 'setMode': {
+            // Omitting topics keeps the room's current ones.
+            const topics = p.topics === undefined ? undefined : parseTopicList(p.topics)
+            ack = (p.mode === 'ffa' || p.mode === 'teams') && (p.preset === 'quick' || p.preset === 'standard') && isDifficulty(p.difficulty) && topics !== null
+              ? engine.setMode(playerId, p.mode, p.preset, SINGLE_LEVEL ?? p.difficulty, topics) : { ok: false, error: 'Invalid room settings' }; break
+          }
           case 'swapSeats': ack = engine.swapSeats(playerId, Number(p.a), Number(p.b)); break
           case 'addAi': ack = AI_SKILLS.includes(p.skill as never) ? engine.addAi(playerId, p.skill as never) : { ok: false, error: 'Invalid AI skill' }; break
           case 'removeSeat': ack = engine.removeSeat(playerId, Number(p.seat)); break

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GameState, GameSummaryRow, PlayerProfile, RoomView, Winner } from '@shared/types.js'
+import type { GameOverPayload, GameState, PlayerProfile, RoomView } from '@shared/types.js'
 import { api } from '../lib/api.ts'
 import { emit, socket } from '../lib/socket.ts'
 import {
@@ -25,7 +25,7 @@ export default function Play() {
   const [loading, setLoading] = useState(true)
   const [room, setRoom] = useState<RoomView | null>(null)
   const [game, setGame] = useState<GameState | null>(null)
-  const [over, setOver] = useState<{ winner: Winner; summary: GameSummaryRow[] } | null>(null)
+  const [over, setOver] = useState<GameOverPayload | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // True from the first render when this device remembers a room, so a reload goes
   // straight to a loader rather than flashing the main menu on the way back in.
@@ -79,7 +79,7 @@ export default function Play() {
       setGame(g)
       if (g.phase !== 'game-over') setOver(null)
     }
-    const onOver = (p: { winner: Winner; summary: GameSummaryRow[] }) => setOver(p)
+    const onOver = (p: GameOverPayload) => setOver(p)
     const onClosed = ({ reason }: { reason: string }) => {
       setNotice(reason)
       setRoom(null)

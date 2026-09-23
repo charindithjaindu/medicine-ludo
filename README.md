@@ -104,7 +104,7 @@ to enter play is the least fun part of Ludo and adds nothing to a question game.
 
 **A turn.**
 1. Roll. The face sets the movement distance and points.
-2. Answer within **60 seconds**. A timeout counts as wrong.
+2. Answer within **60 seconds** (90 on Hard). A timeout counts as wrong.
 3. Correct → move a piece **forward by the roll**. Wrong → move one **back
    `floor(roll/2)`**, never past your own start. If only one piece can make the
    move, it just moves; if both can, you pick.
@@ -126,6 +126,21 @@ team, and partners can neither capture nor be captured by each other.
 roll, +25 per capture, +50 per piece home, +100 for the win. A wrong answer is
 worth 0 — never negative, so the leaderboard stays encouraging.
 
+## Learning features
+
+- **After every answer** the table sees the chosen answer, the correct one and the
+  question's explanation, if it has one.
+- **Review**: the game-over screen lists each of your questions with your answer,
+  the correct one, the explanation and how long you took.
+- **My progress** (`/progress`): accuracy, answer times and "skipped" (timed-out)
+  questions overall and per topic, a per-game trend for each topic, and the
+  questions to revisit, marked once you have since got them right.
+- **How to play** is one tap away on the home menu and inside every game.
+
+Answer time runs from the moment the question appears (after the die settles) to
+the moment the answer reaches the server; the second an answer is held on screen
+before resolving does not count.
+
 ---
 
 ## Admin
@@ -143,8 +158,18 @@ password box, and every `/api/admin/*` route returns 401 without a session.
   reads 0, no room can pick it.
 - **Retiring** is the default over deleting: it keeps a question's stats and pulls
   it from future games.
-- Per-question **asked / correct-rate / timeouts**, sortable worst-first. A 0%
-  card is probably wrong or ambiguous; a 100% card on a hard difficulty belongs lower.
+- Every question can carry a **topic** (e.g. Jaundice, Cardiac Biomarkers), set on
+  the edit form or through the `topic` import column; blank means General. The host
+  picks topics when creating a room, and the deck only draws from those.
+- Per-question **asked / correct-rate / timeouts / average answer time**, sortable
+  worst-first. A 0% card is probably wrong or ambiguous; a 100% card on a hard
+  difficulty belongs lower.
+- **Players** tab: accuracy, answer times and timeouts per player, with each
+  player's full progress view.
+- **Answer log export** (Import / Export tab): one CSV row per question a human
+  answered — player, question, topic, chosen and correct letter, outcome
+  (`correct` / `wrong` / `timeout`) and time taken. This is the research data;
+  it starts with the first game played after the answer log was added.
 - Bulk CSV/JSON import with a **dry-run preview** before anything is written, plus
   export. An export re-imported updates the same rows, so it doubles as a backup.
 - Re-run the source PDF from the CLI with `npm run import:pdf`, using `DATABASE_PATH`

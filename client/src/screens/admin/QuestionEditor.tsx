@@ -4,24 +4,31 @@ import {
   DIFFICULTIES,
   DIFFICULTY_EMOJI,
   DIFFICULTY_NAMES,
+  TOPIC_MAX_LENGTH,
+  topicLabel,
   type AnswerLetter,
   type Difficulty,
   type Question,
+  type TopicCount,
 } from '@shared/types.js'
 import { adminApi } from '../../lib/api.ts'
 
 export default function QuestionEditor({
   question,
+  topics,
   onClose,
   onSaved,
 }: {
   question: Question | null
+  /** Existing topics, offered as suggestions so spellings stay consistent. */
+  topics: TopicCount[]
   onClose: () => void
   onSaved: () => void
 }) {
   const [difficulty, setDifficulty] = useState<Difficulty>(
     question?.difficulty ?? 'easy',
   )
+  const [topic, setTopic] = useState(question?.topic ?? '')
   const [text, setText] = useState(question?.text ?? '')
   const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', ''])
   const [answer, setAnswer] = useState<AnswerLetter>(question?.answer ?? 'A')
@@ -36,6 +43,7 @@ export default function QuestionEditor({
     setError(null)
     const body = {
       difficulty,
+      topic: topic.trim(),
       text,
       options,
       answer,
@@ -123,6 +131,52 @@ export default function QuestionEditor({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">
+                Topic{' '}
+                <span className="text-slate-400">
+                  — pick an existing one so it groups correctly; leave blank for General
+                </span>
+              </span>
+              <input
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                list="question-topics"
+                maxLength={TOPIC_MAX_LENGTH}
+                placeholder="General"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-slate-900"
+              />
+            </label>
+            <datalist id="question-topics">
+              {topics
+                .filter((t) => t.topic)
+                .map((t) => (
+                  <option key={t.topic} value={t.topic} />
+                ))}
+            </datalist>
+            {topics.some((t) => t.topic) && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {topics
+                  .filter((t) => t.topic)
+                  .map((t) => (
+                    <button
+                      key={t.topic}
+                      type="button"
+                      onClick={() => setTopic(t.topic)}
+                      className={`rounded-full px-2.5 py-0.5 text-xs ring-1 transition ${
+                        topic.trim() === t.topic
+                          ? 'bg-slate-900 text-white ring-slate-900'
+                          : 'bg-white text-slate-600 ring-slate-200 hover:ring-slate-400'
+                      }`}
+                    >
+                      {topicLabel(t.topic)} <span className="opacity-60">{t.count}</span>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           <label className="block">

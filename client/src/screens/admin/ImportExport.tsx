@@ -1,12 +1,20 @@
 import { useState } from 'react'
+import type { TopicCount } from '@shared/types.js'
 import { adminApi, type ImportResponse } from '../../lib/api.ts'
+import AnswerExport from './AnswerExport.tsx'
 
 /**
  * Bulk import always previews first. The dry run reports exactly what would be
  * created, updated and rejected, and writes nothing — so an admin can look before
  * they leap.
  */
-export default function ImportExport({ onChanged }: { onChanged: () => void }) {
+export default function ImportExport({
+  onChanged,
+  topics,
+}: {
+  onChanged: () => void
+  topics: TopicCount[]
+}) {
   const [format, setFormat] = useState<'csv' | 'json'>('csv')
   const [payload, setPayload] = useState('')
   const [preview, setPreview] = useState<ImportResponse | null>(null)
@@ -64,10 +72,12 @@ export default function ImportExport({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div className="space-y-4">
+      <AnswerExport topics={topics} />
+
       <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-        <h2 className="font-semibold">Export</h2>
+        <h2 className="font-semibold">Export questions</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Download the whole bank. Re-importing an export updates the same rows rather than
+          Download the whole bank, topics included. Re-importing an export updates the same rows rather than
           duplicating them, so it doubles as a backup.
         </p>
         <div className="mt-3 flex gap-2">
@@ -92,7 +102,10 @@ export default function ImportExport({ onChanged }: { onChanged: () => void }) {
           Columns: <code className="text-xs">difficulty, text, option_a, option_b, option_c, option_d,
           answer</code> — difficulty is one of (
           <code className="text-xs">easy</code> / <code className="text-xs">medium</code> /{' '}
-          <code className="text-xs">hard</code>),{' '}
+          <code className="text-xs">hard</code>). Optional:{' '}
+          <code className="text-xs">topic</code> (free text, up to 40 characters — match an
+          existing topic's spelling; blank means General, and leaving the column out keeps
+          existing topics),{' '}
           <code className="text-xs">id</code>, <code className="text-xs">source_card</code>,{' '}
           <code className="text-xs">explanation</code>, <code className="text-xs">active</code>. A
           row with a matching <code className="text-xs">id</code> or{' '}
@@ -126,8 +139,8 @@ export default function ImportExport({ onChanged }: { onChanged: () => void }) {
           rows={8}
           placeholder={
             format === 'csv'
-              ? 'difficulty,text,option_a,option_b,option_c,option_d,answer\neasy,What is…,First,Second,Third,Fourth,B'
-              : '[{"difficulty":"easy","text":"What is…","options":["a","b","c","d"],"answer":"B"}]'
+              ? 'difficulty,topic,text,option_a,option_b,option_c,option_d,answer\neasy,Jaundice,What is…,First,Second,Third,Fourth,B'
+              : '[{"difficulty":"easy","topic":"Jaundice","text":"What is…","options":["a","b","c","d"],"answer":"B"}]'
           }
           className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs outline-none focus:border-slate-900"
         />

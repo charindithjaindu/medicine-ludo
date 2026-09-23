@@ -1,4 +1,13 @@
-import type { Difficulty, LeaderboardRow, PlayerProfile, Question } from '@shared/types.js'
+import type {
+  AdminPlayerRow,
+  AdminQuestion,
+  Difficulty,
+  LeaderboardRow,
+  PlayerProfile,
+  PlayerProgress,
+  Question,
+  TopicCount,
+} from '@shared/types.js'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -31,6 +40,13 @@ export const api = {
     }).then((r) => r.player),
 
   leaderboard: () => request<{ rows: LeaderboardRow[] }>('/api/leaderboard').then((r) => r.rows),
+
+  progress: (id: string) =>
+    request<PlayerProgress>(`/api/players/${encodeURIComponent(id)}/progress`),
+
+  /** Topics with at least one active question at this difficulty. */
+  topics: (difficulty: Difficulty) =>
+    request<TopicCount[]>(`/api/topics?difficulty=${encodeURIComponent(difficulty)}`),
 }
 
 export interface ImportPlanRow {
@@ -61,15 +77,19 @@ export const adminApi = {
     difficulty?: Difficulty | ''
     active?: string
     search?: string
+    /** null = every topic; '' = uncategorised ("General"). */
+    topic?: string | null
   }) => {
     const qs = new URLSearchParams()
     if (params.difficulty) qs.set('difficulty', params.difficulty)
+    if (params.topic !== undefined && params.topic !== null) qs.set('topic', params.topic)
     if (params.active && params.active !== 'all') qs.set('active', params.active)
     if (params.search) qs.set('search', params.search)
     return request<{
-      questions: Question[]
+      questions: AdminQuestion[]
       counts: Record<Difficulty, number>
       difficultyCounts: Record<Difficulty, number>
+      topics: TopicCount[]
     }>(`/api/admin/questions?${qs}`)
   },
 
@@ -107,4 +127,24 @@ export const adminApi = {
     ),
 
   exportUrl: (format: 'json' | 'csv') => `/api/admin/questions/export?format=${format}`,
+
+  players: () =>
+    request<{ players: AdminPlayerRow[] }>('/api/admin/players').then((r) => r.players),
+
+  playerProgress: (id: string) =>
+    request<PlayerProgress>(`/api/admin/players/${encodeURIComponent(id)}/progress`),
+
+  /** The raw answer log — one row per attempt — which is what the researchers analyse. */
+  answersExportUrl: (params: {
+    format: 'csv' | 'json'
+    from?: string
+    to?: string
+    topic?: string | null
+  }) => {
+    const qs = new URLSearchParams({ format: params.format })
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    if (params.topic !== undefined && params.topic !== null) qs.set('topic', params.topic)
+    return `/api/admin/answers/export?${qs}`
+  },
 }

@@ -210,6 +210,9 @@ export function markAnswer(state: GameState, letter: AnswerLetter): GameState {
 
 export interface ResolveAnswerInput {
   difficulty?: import("./types.js").Difficulty
+  topic?: string
+  /** Measured by the caller, which owns the clock. */
+  timeMs?: number
   /** null means the clock ran out. */
   chosen: AnswerLetter | null
   correctLetter: AnswerLetter
@@ -257,6 +260,7 @@ export function resolveAnswer(state: GameState, input: ResolveAnswerInput): Game
     seat,
     roll,
     difficulty: input.difficulty ?? state.question?.difficulty ?? 'medium',
+    topic: input.topic ?? state.question?.topic ?? '',
     questionId: input.questionId,
     questionText: input.questionText,
     options: input.options,
@@ -264,6 +268,7 @@ export function resolveAnswer(state: GameState, input: ResolveAnswerInput): Game
     correctLetter: input.correctLetter,
     wasCorrect,
     explanation: input.explanation,
+    timeMs: input.timeMs ?? 0,
     distance,
     movedPieceId: null,
     captured: [],
