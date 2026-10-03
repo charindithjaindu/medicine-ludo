@@ -5,8 +5,14 @@ import type { AckMessage, ServerMessage } from '@shared/protocol.js'
 
 type Handler = (payload: never) => void
 
+/** A call awaiting its ack, plus the timeout that keeps it from hanging forever. */
+interface PendingCall {
+  resolve: (ack: Ack) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
 const handlers = new Map<string, Set<Handler>>()
-const pending = new Map<number, (ack: Ack) => void>()
+const pending = new Map<number, PendingCall>()
 
 let ws: WebSocket | null = null
 let current: { code: string; playerId: string } | null = null
@@ -18,6 +24,15 @@ function fire(event: string, payload: unknown) {
   for (const handler of handlers.get(event) ?? []) (handler as (p: unknown) => void)(payload)
 }
 
+/** Settle every call still in flight, as the socket that carries them is going away. */
+function flushPending(error: string) {
+  for (const call of pending.values()) {
+    clearTimeout(call.timer)
+    call.resolve({ ok: false, error })
+  }
+  pending.clear()
+}
+
 function socketUrl(code: string, playerId: string): string {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams({ code, playerId })
@@ -26,8 +41,7 @@ function socketUrl(code: string, playerId: string): string {
 
 function open(code: string, playerId: string): Promise<Ack<{ code: string }>> {
   // Replace the previous socket before opening another. Its callbacks cannot reconnect it.
-  for (const done of pending.values()) done({ ok: false, error: 'Connection replaced' })
-  pending.clear()
+  flushPending('Connection replaced')
   const previous = ws
   ws = null
   previous?.close(1000, 'replaced')
@@ -59,9 +73,12 @@ function open(code: string, playerId: string): Promise<Ack<{ code: string }>> {
         fire('connect', undefined)
       }
       if (message.t === 'ack') {
-        const done = pending.get(message.id)
-        pending.delete(message.id)
-        done?.(message as Ack)
+        const call = pending.get(message.id)
+        if (call) {
+          pending.delete(message.id)
+          clearTimeout(call.timer)
+          call.resolve(message as Ack)
+        }
       } else fire(message.event, message.payload)
     }
     connection.onclose = (event) => {
@@ -69,8 +86,7 @@ function open(code: string, playerId: string): Promise<Ack<{ code: string }>> {
       settle({ ok: false, error: event.reason || refusalReason(event.code) })
       if (ws !== connection) return
       ws = null
-      for (const done of pending.values()) done({ ok: false, error: 'Connection interrupted' })
-      pending.clear()
+      flushPending('Connection interrupted')
       if (event.code === 4003 || event.code === 4004) {
         current = null
         fire('roomClosed', { reason: event.reason || refusalReason(event.code) })
@@ -106,12 +122,15 @@ function send(event: string, payload?: unknown): Promise<Ack> {
   }
   const id = nextCallId++
   return new Promise((resolve) => {
-    pending.set(id, resolve)
-    socket.send(JSON.stringify({ t: 'call', id, event, payload }))
     // Never leave a caller hanging on a dropped connection.
-    setTimeout(() => {
-      if (pending.delete(id)) resolve({ ok: false, error: 'The server did not respond' })
-    }, 10000)
+    const call: PendingCall = {
+      resolve,
+      timer: setTimeout(() => {
+        if (pending.delete(id)) resolve({ ok: false, error: 'The server did not respond' })
+      }, 10000),
+    }
+    pending.set(id, call)
+    socket.send(JSON.stringify({ t: 'call', id, event, payload }))
   })
 }
 

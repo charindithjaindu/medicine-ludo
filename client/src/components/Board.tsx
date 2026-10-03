@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   boardConfig,
   cellFor,
@@ -13,7 +13,7 @@ import {
   type BoardConfig,
   type Cell,
 } from '@shared/board.js'
-import type { GameState } from '@shared/types.js'
+import type { BoardPreset, GameState } from '@shared/types.js'
 
 const key = (c: Cell) => `${c.row},${c.col}`
 
@@ -54,18 +54,26 @@ function useWalkingPieces(game: GameState): Map<string, number> {
     const tick = () => {
       const next = new Map<string, number>()
       let walking = false
+      let changed = false
       for (const [id, want] of target) {
         const have = shownRef.current.get(id)
         if (have === undefined || have === want) {
+          if (have === undefined) changed = true
           next.set(id, want)
           continue
         }
         const delta = want - have
         next.set(id, Math.abs(delta) <= MAX_WALK ? have + Math.sign(delta) : want)
         walking = true
+        changed = true
       }
-      shownRef.current = next
-      setShown(next)
+      // The effect re-runs on every game broadcast even when no piece moved;
+      // repainting the whole board for an identical position is the one render
+      // worth skipping.
+      if (changed) {
+        shownRef.current = next
+        setShown(next)
+      }
       if (walking) timer = setTimeout(tick, STEP_MS)
     }
 
@@ -110,35 +118,30 @@ type Painted =
   | { kind: 'home'; row: number; col: number; seat: number }
 
 /**
- * A cross-shaped Ludo board: four corner yards, a track running around the arms,
- * each player's colour running up the middle of their arm, and the four home
- * triangles meeting in the centre.
- *
- * Cells are laid out on a percentage grid and pieces are absolutely positioned on
- * top, so a move animates by transitioning left/top rather than jumping between
- * DOM parents.
+ * Everything on the board that cannot move: corner yards, the track, the home
+ * columns and the centre triangles. It depends only on the preset, the seat the
+ * board is drawn from and the players' initials, so memoising it keeps the walk
+ * animation and each turn's game broadcasts from re-rendering the layer underneath
+ * the pieces.
  */
-export default function Board({
-  game,
-  viewSeat = 0,
-  choices = [],
-  onPick,
+const BoardStatic = memo(function BoardStatic({
+  preset,
+  quarter,
+  highlightSeat,
+  initials,
 }: {
-  game: GameState
-  /** Whose point of view. That seat is always drawn in the bottom-left corner. */
-  viewSeat?: number
-  choices?: string[]
-  onPick?: (pieceId: string) => void
+  preset: BoardPreset
+  quarter: number
+  /** The viewer's seat, whose yard gets the amber ring; negative for nobody. */
+  highlightSeat: number
+  /** One name per seat, joined with '|', so memo compares strings not arrays. */
+  initials: string
 }) {
-  const b = boardConfig(game.preset)
+  const b = boardConfig(preset)
   const step = 100 / b.side
   const pct = (n: number) => `${n * step}%`
-  const walking = useWalkingPieces(game)
-
-  // Yards run clockwise from the top-right: seat 0, 1, 2, 3. Bottom-left is the
-  // third of those, so turn the board until the viewer's seat lands there.
-  const quarter = (2 - (viewSeat < 0 ? 0 : viewSeat) + 4) % 4
   const spin = (cell: Cell) => rotateCell(cell, quarter, b.side)
+  const names = initials.split('|')
 
   const painted: Painted[] = []
 
@@ -163,7 +166,101 @@ export default function Board({
     }
   }
 
-  // Group pieces by cell so a stack fans out instead of hiding behind itself.
+  const centre = rotateRect(centreBlock(b), quarter, b.side)
+
+  return (
+    <>
+      {/* Corner yards */}
+      {[0, 1, 2, 3].map((seat) => {
+        const rect = rotateRect(yardRect(seat, b), quarter, b.side)
+        return (
+          <div
+            key={`yard-${seat}`}
+            className="absolute p-[1.5%]"
+            style={{
+              left: pct(rect.col),
+              top: pct(rect.row),
+              width: pct(rect.size),
+              height: pct(rect.size),
+            }}
+          >
+            <div
+              className={`grid h-full w-full place-items-center rounded-lg border-[3px] border-ink ${
+                seat === highlightSeat ? 'ring-4 ring-amber-300' : ''
+              }`}
+              style={{ backgroundColor: SEAT_COLORS[seat] }}
+            >
+              <div className="grid h-[62%] w-[62%] place-items-center rounded-md bg-white/85">
+                <span
+                  className="text-[0.7rem] font-bold leading-none"
+                  style={{ color: SEAT_COLORS[seat] }}
+                >
+                  {(names[seat] ?? '').slice(0, 1).toUpperCase() || '·'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Track and home columns */}
+      {painted.map((cell) => (
+        <div
+          key={`${cell.kind}-${cell.row},${cell.col}`}
+          className="absolute p-[0.35%]"
+          style={{ left: pct(cell.col), top: pct(cell.row), width: pct(1), height: pct(1) }}
+        >
+          <CellFace cell={cell} />
+        </div>
+      ))}
+
+      {/* The four home triangles at the middle of the cross */}
+      <div
+        className="absolute p-[0.4%]"
+        style={{
+          left: pct(centre.col),
+          top: pct(centre.row),
+          width: pct(centre.size),
+          height: pct(centre.size),
+        }}
+      >
+        <HomeTriangles quarter={quarter} />
+      </div>
+    </>
+  )
+})
+
+/**
+ * A cross-shaped Ludo board: four corner yards, a track running around the arms,
+ * each player's colour running up the middle of their arm, and the four home
+ * triangles meeting in the centre.
+ *
+ * Cells are laid out on a percentage grid and pieces are absolutely positioned on
+ * top, so a move animates by transitioning left/top rather than jumping between
+ * DOM parents.
+ */
+export default memo(function Board({
+  game,
+  viewSeat = 0,
+  choices = [],
+  onPick,
+}: {
+  game: GameState
+  /** Whose point of view. That seat is always drawn in the bottom-left corner. */
+  viewSeat?: number
+  choices?: string[]
+  onPick?: (pieceId: string) => void
+}) {
+  const b = boardConfig(game.preset)
+  const step = 100 / b.side
+  const pct = (n: number) => `${n * step}%`
+  const walking = useWalkingPieces(game)
+
+  // Yards run clockwise from the top-right: seat 0, 1, 2, 3. Bottom-left is the
+  // third of those, so turn the board until the viewer's seat lands there.
+  const quarter = (2 - (viewSeat < 0 ? 0 : viewSeat) + 4) % 4
+  const spin = (cell: Cell) => rotateCell(cell, quarter, b.side)
+
   const tokens = game.players.flatMap((p) =>
     p.pieces.map((piece) => {
       const at = walking.get(piece.id) ?? piece.progress
@@ -175,6 +272,8 @@ export default function Board({
       }
     }),
   )
+
+  // Group pieces by cell so a stack fans out instead of hiding behind itself.
   const stacks = new Map<string, number>()
   const placed = tokens.map((t) => {
     const k = key(t.cell)
@@ -183,69 +282,17 @@ export default function Board({
     return { ...t, index }
   })
 
-  const centre = rotateRect(centreBlock(b), quarter, b.side)
-
   return (
     <div className="panel relative aspect-square w-full select-none p-2.5">
       {/* No overflow-hidden: pawns are drawn standing slightly above their square,
           so the top row would otherwise be clipped by the board edge. */}
       <div className="relative h-full w-full rounded-lg bg-[#f2ede0]">
-        {/* Corner yards */}
-        {[0, 1, 2, 3].map((seat) => {
-          const rect = rotateRect(yardRect(seat, b), quarter, b.side)
-          return (
-            <div
-              key={`yard-${seat}`}
-              className="absolute p-[1.5%]"
-              style={{
-                left: pct(rect.col),
-                top: pct(rect.row),
-                width: pct(rect.size),
-                height: pct(rect.size),
-              }}
-            >
-              <div
-                className={`grid h-full w-full place-items-center rounded-lg border-[3px] border-ink ${
-                  seat === viewSeat ? 'ring-4 ring-amber-300' : ''
-                }`}
-                style={{ backgroundColor: SEAT_COLORS[seat] }}
-              >
-                <div className="grid h-[62%] w-[62%] place-items-center rounded-md bg-white/85">
-                  <span
-                    className="text-[0.7rem] font-bold leading-none"
-                    style={{ color: SEAT_COLORS[seat] }}
-                  >
-                    {(game.players[seat]?.name ?? '').slice(0, 1).toUpperCase() || '·'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-
-        {/* Track and home columns */}
-        {painted.map((cell) => (
-          <div
-            key={`${cell.kind}-${cell.row},${cell.col}`}
-            className="absolute p-[0.35%]"
-            style={{ left: pct(cell.col), top: pct(cell.row), width: pct(1), height: pct(1) }}
-          >
-            <CellFace cell={cell} />
-          </div>
-        ))}
-
-        {/* The four home triangles at the middle of the cross */}
-        <div
-          className="absolute p-[0.4%]"
-          style={{
-            left: pct(centre.col),
-            top: pct(centre.row),
-            width: pct(centre.size),
-            height: pct(centre.size),
-          }}
-        >
-          <HomeTriangles quarter={quarter} />
-        </div>
+        <BoardStatic
+          preset={game.preset}
+          quarter={quarter}
+          highlightSeat={viewSeat}
+          initials={game.players.map((p) => p.name).join('|')}
+        />
 
         {/* Pieces */}
         {placed.map((t) => {
@@ -288,7 +335,7 @@ export default function Board({
       </div>
     </div>
   )
-}
+})
 
 function CellFace({ cell }: { cell: Painted }) {
   if (cell.kind === 'home') {

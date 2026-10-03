@@ -143,6 +143,13 @@ const CHORDS = [
 ]
 const STEP_SECONDS = 0.27
 const STEPS_PER_BAR = 8
+/**
+ * A slower scheduler tick costs nothing audible as long as the loop always stays
+ * ahead of the clock by more than one tick: 100ms wakeups instead of 25ms means
+ * four times fewer wakeups for the same stream of scheduled notes.
+ */
+const SCHEDULER_INTERVAL_MS = 100
+const SCHEDULER_LOOKAHEAD_SECONDS = 0.6
 
 function scheduleStep(index: number, at: number) {
   const bar = Math.floor(index / STEPS_PER_BAR) % CHORDS.length
@@ -169,7 +176,7 @@ function scheduleStep(index: number, at: number) {
 function scheduler() {
   const c = ctx
   if (!c) return
-  while (nextNoteAt < c.currentTime + 0.2) {
+  while (nextNoteAt < c.currentTime + SCHEDULER_LOOKAHEAD_SECONDS) {
     scheduleStep(step, nextNoteAt)
     nextNoteAt += STEP_SECONDS
     step++
@@ -181,7 +188,7 @@ function startMusic() {
   if (!c || schedulerTimer !== null) return
   nextNoteAt = c.currentTime + 0.15
   step = 0
-  schedulerTimer = window.setInterval(scheduler, 25)
+  schedulerTimer = window.setInterval(scheduler, SCHEDULER_INTERVAL_MS)
 }
 
 function stopMusic() {
@@ -321,4 +328,15 @@ if (typeof window !== 'undefined') {
   const unlock = () => audio.unlock()
   window.addEventListener('pointerdown', unlock, { once: true })
   window.addEventListener('keydown', unlock, { once: true })
+  // A hidden tab throttles timers to about 1Hz, so an unchecked scheduler would
+  // catch up on return by firing every missed step at once. Pause instead — the
+  // vamp restarts from its top when the tab comes back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopMusic()
+    } else if (enabled && unlocked) {
+      void ctx?.resume()
+      startMusic()
+    }
+  })
 }

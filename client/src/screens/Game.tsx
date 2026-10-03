@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ANSWER_LETTERS,
   ANSWER_SECONDS,
@@ -83,6 +83,10 @@ const TIER_COLORS: Record<number, string> = {
   6: 'bg-fuchsia-300',
 }
 
+// A stable empty array: Board is memoised, and a fresh `[]` per render would
+// defeat it on every pass that is not a piece-choice turn.
+const NO_CHOICES: string[] = []
+
 export default function Game({
   player,
   room,
@@ -108,6 +112,10 @@ export default function Game({
   // on this screen; the server keeps everyone else's timing exactly as it was.
   const [dismissedReveal, setDismissedReveal] = useState('')
   const revealKey = game.lastResult ? answerBeat(game.lastResult) : ''
+  const pickPiece = useCallback((pieceId: string) => {
+    audio.play('click')
+    emit('choosePiece', { pieceId })
+  }, [])
 
   return (
     <div className="relative min-h-full">
@@ -156,11 +164,8 @@ export default function Game({
             <Board
               game={game}
               viewSeat={mySeat}
-              choices={myTurn && game.phase === 'choosing-piece' ? game.choices : []}
-              onPick={(pieceId) => {
-                audio.play('click')
-                emit('choosePiece', { pieceId })
-              }}
+              choices={myTurn && game.phase === 'choosing-piece' ? game.choices : NO_CHOICES}
+              onPick={pickPiece}
             />
             <p className="mt-2 text-center text-xs font-medium text-white/60">
               {game.mode === 'teams'

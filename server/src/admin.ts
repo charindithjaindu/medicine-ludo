@@ -141,10 +141,11 @@ export async function handleAdmin(
       active: active === null || active === 'all' ? undefined : active === 'true',
       search: url.searchParams.get('search') ?? undefined,
     })
+    const counts = db.activeCountByDifficulty()
     return json({
       questions,
-      counts: db.activeCountByDifficulty(),
-      difficultyCounts: db.activeCountByDifficulty(),
+      counts,
+      difficultyCounts: counts,
       // Every topic in the bank, retired questions included, for the filter.
       topics: db.listTopics({ activeOnly: false }),
     })

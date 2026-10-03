@@ -13,11 +13,19 @@ interface Room {
   sockets: Map<WebSocket, string>
   idleSince: number | null
   paused: boolean
+  dirty: boolean
 }
 export class Rooms {
   readonly rooms = new Map<string, Room>()
   private sweep: ReturnType<typeof setInterval>
+  private flushTimer: ReturnType<typeof setInterval>
   private shuttingDown = false
+  /**
+   * How often dirty rooms are written back. A crash can lose this much of a
+   * game's progress — an acceptable trade for not serialising and writing the
+   * whole room snapshot (question deck included) on every broadcast.
+   */
+  private static readonly FLUSH_MS = 5_000
   constructor(readonly db: Db, private timings: RoomTimings = DEFAULT_TIMINGS, private graceMs = 90_000) {
     db.sql.prepare('DELETE FROM rooms WHERE expires_at < ?').bind(Date.now()).run()
     const rows = db.sql.prepare('SELECT snapshot FROM rooms').all<{ snapshot: string }>().results
@@ -30,15 +38,17 @@ export class Rooms {
     }
     this.sweep = setInterval(() => this.prune(), 10_000)
     this.sweep.unref()
+    this.flushTimer = setInterval(() => this.flush(), Rooms.FLUSH_MS)
+    this.flushTimer.unref()
   }
   private makeRoom(code: string, id: string = randomUUID()): Room {
-    return { id, engine: null as unknown as RoomEngine, sockets: new Map(), idleSince: Date.now(), paused: false }
+    return { id, engine: null as unknown as RoomEngine, sockets: new Map(), idleSince: Date.now(), paused: false, dirty: false }
   }
   private hooks(room: Room) {
     return {
       broadcast: (message: ServerMessage) => {
         if (this.shuttingDown) return
-        this.save(room)
+        this.markDirty(room)
         const text = JSON.stringify(message)
         for (const ws of room.sockets.keys()) this.send(ws, text)
       },
@@ -60,6 +70,14 @@ export class Rooms {
     if (!room.engine) return
     this.db.sql.prepare('INSERT OR REPLACE INTO rooms(code,snapshot,expires_at) VALUES (?,?,?)')
       .bind(room.engine.code, JSON.stringify({ id: room.id, engine: room.engine.snapshot() }), Date.now() + 6 * 3600_000).run()
+    room.dirty = false
+  }
+  /** Broadcasts only mark the room dirty; the flush timer writes them back. */
+  private markDirty(room: Room) {
+    if (room.engine) room.dirty = true
+  }
+  private flush() {
+    for (const room of this.rooms.values()) if (room.dirty) this.save(room)
   }
   create(profile: PlayerProfile, mode: GameMode, preset: BoardPreset, difficulty: Difficulty, topics: string[] = []) {
     if (this.rooms.size >= 500) throw new Error('Room capacity reached. Please try again shortly.')
@@ -149,6 +167,7 @@ export class Rooms {
   close() {
     this.shuttingDown = true
     clearInterval(this.sweep)
+    clearInterval(this.flushTimer)
     for (const room of this.rooms.values()) {
       room.engine.dispose()
       this.save(room)

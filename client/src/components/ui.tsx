@@ -3,16 +3,24 @@ import { audio } from '../lib/audio.ts'
 
 /** The animated night-table backdrop. Rendered once behind every screen. */
 export function Backdrop() {
+  // Each blob fades itself out with a radial gradient — the cheap stand-in for
+  // the blur() this decoration used to pay GPU time for on every frame.
   return (
     <div className="ml-backdrop" aria-hidden>
       <span
         className="ml-blob"
-        style={{ background: '#f43f5e', width: 420, height: 420, top: '-6%', left: '-4%' }}
+        style={{
+          background: 'radial-gradient(circle, #f43f5e 0%, transparent 72%)',
+          width: 420,
+          height: 420,
+          top: '-6%',
+          left: '-4%',
+        }}
       />
       <span
         className="ml-blob"
         style={{
-          background: '#06b6d4',
+          background: 'radial-gradient(circle, #06b6d4 0%, transparent 72%)',
           width: 380,
           height: 380,
           top: '55%',
@@ -23,7 +31,7 @@ export function Backdrop() {
       <span
         className="ml-blob"
         style={{
-          background: '#f59e0b',
+          background: 'radial-gradient(circle, #f59e0b 0%, transparent 72%)',
           width: 340,
           height: 340,
           bottom: '-8%',

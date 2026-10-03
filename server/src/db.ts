@@ -482,10 +482,49 @@ export class Db {
 
   /** Every player who has played, with answer figures from the log. Most recent first. */
   adminPlayers(): AdminPlayerRow[] {
-    const log = this.sql
-      .prepare('SELECT player_id, outcome, time_ms FROM answer_log')
-      .all<{ player_id: string; outcome: AnswerOutcome; time_ms: number }>().results
-    const byPlayer = groupBy(log, (r) => r.player_id)
+    // Aggregated in SQL: the log is the research table and only grows, so loading
+    // every row into JS to group it would scale with all-time answers, not players.
+    const stats = this.sql
+      .prepare(
+        `SELECT player_id, COUNT(*) AS answered, SUM(outcome = 'correct') AS correct,
+           SUM(outcome = 'timeout') AS timeouts,
+           AVG(CASE WHEN outcome <> 'timeout' THEN time_ms END) AS mean_ms
+         FROM answer_log GROUP BY player_id`,
+      )
+      .all<{ player_id: string; answered: number; correct: number; timeouts: number; mean_ms: number | null }>()
+      .results
+    // The median needs each player's times in order; the window-function trick
+    // keeps that scan inside SQLite and only returns one row per player.
+    const medians = new Map(
+      this.sql
+        .prepare(
+          `WITH times AS (
+             SELECT player_id, time_ms,
+               ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY time_ms) AS rn,
+               COUNT(*) OVER (PARTITION BY player_id) AS n
+             FROM answer_log WHERE outcome <> 'timeout'
+           )
+           SELECT player_id, ROUND(AVG(time_ms)) AS median_ms
+           FROM times WHERE rn IN ((n + 1) / 2, (n + 2) / 2)
+           GROUP BY player_id`,
+        )
+        .all<{ player_id: string; median_ms: number | null }>()
+        .results.map((r) => [r.player_id, r.median_ms]),
+    )
+    const figures = new Map(
+      stats.map((r) => [
+        r.player_id,
+        {
+          answered: r.answered,
+          correct: r.correct,
+          wrong: r.answered - r.correct - r.timeouts,
+          timeouts: r.timeouts,
+          accuracy: r.answered ? r.correct / r.answered : 0,
+          medianTimeMs: medians.get(r.player_id) ?? null,
+          meanTimeMs: r.mean_ms == null ? null : Math.round(r.mean_ms),
+        },
+      ]),
+    )
     const { results } = this.sql
       .prepare(
         `SELECT * FROM players
@@ -501,7 +540,15 @@ export class Db {
         gamesPlayed: p.gamesPlayed,
         totalScore: p.totalScore,
         lastSeen: row.last_seen as string,
-        ...statsOf(byPlayer.get(p.id) ?? []),
+        ...(figures.get(p.id) ?? {
+          answered: 0,
+          correct: 0,
+          wrong: 0,
+          timeouts: 0,
+          accuracy: 0,
+          medianTimeMs: null,
+          meanTimeMs: null,
+        }),
       }
     })
   }

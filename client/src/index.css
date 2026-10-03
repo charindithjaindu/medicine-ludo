@@ -52,12 +52,20 @@ body {
     linear-gradient(160deg, #1a1240 0%, #241559 45%, #12103a 100%);
 }
 
+/* The soft edge is baked into each blob's radial gradient rather than done with
+   filter: blur(), which forced the GPU to re-blur three large layers every frame
+   of the drift animation — constant work on every screen, for a decoration. */
 .ml-blob {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(70px);
   opacity: 0.5;
   animation: drift 26s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-blob {
+    animation: none;
+  }
 }
 
 @keyframes drift {
